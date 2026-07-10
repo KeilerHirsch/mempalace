@@ -5324,3 +5324,99 @@ class TestListDrawersDateFilters:
 
         since = datetime(2026, 1, 2)
         assert _filed_at_in_window("2026-01-02T08:00:00Z", since, None) is True
+
+
+# ── MCP stdio startup: async preflight ───────────────────────────────────
+
+
+def test_startup_preflight_does_not_block_initialize(monkeypatch):
+    """The startup integrity probe is O(database size) (PRAGMA quick_check
+    reads every page of chroma.sqlite3 — 20s+ on multi-GB palaces) and used
+    to run before the protocol loop, starving the client's initialize
+    timeout. It now runs on the mcp-startup-preflight thread; the handshake
+    must answer immediately while the probe is still in flight."""
+    import threading
+    import time
+
+    from mempalace import mcp_server
+
+    probe_started = threading.Event()
+    release_probe = threading.Event()
+
+    def slow_probe():
+        probe_started.set()
+        release_probe.wait(10)
+        mcp_server._sqlite_integrity_checked = True
+
+    monkeypatch.setattr(mcp_server, "_refresh_sqlite_integrity_status_locked", slow_probe)
+    monkeypatch.setattr(mcp_server, "_sqlite_integrity_checked", False)
+    monkeypatch.setattr(mcp_server, "_refresh_vector_disabled_flag", lambda: None)
+
+    preflight = threading.Thread(target=mcp_server._startup_preflight, daemon=True)
+    preflight.start()
+    try:
+        assert probe_started.wait(5), "preflight thread never started the probe"
+
+        started = time.monotonic()
+        response = mcp_server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {"protocolVersion": "2024-11-05"},
+            }
+        )
+        elapsed = time.monotonic() - started
+
+        assert response["result"]["serverInfo"]["name"] == "mempalace"
+        assert elapsed < 1.0, f"initialize blocked {elapsed:.2f}s behind the startup probe"
+    finally:
+        release_probe.set()
+        preflight.join(5)
+
+
+def test_ensure_sqlite_integrity_status_joins_inflight_probe(monkeypatch):
+    """A lazy consumer (tool-call integrity gate) arriving while the startup
+    preflight probe is still running must wait for that probe's verdict on
+    _sqlite_integrity_refresh_lock — not run a second O(database size)
+    quick_check concurrently, and not proceed without a verdict."""
+    import threading
+
+    from mempalace import mcp_server
+
+    probe_calls = []
+    probe_started = threading.Event()
+    release_probe = threading.Event()
+
+    def slow_probe():
+        probe_calls.append(1)
+        probe_started.set()
+        release_probe.wait(10)
+        mcp_server._sqlite_integrity_checked = True
+
+    monkeypatch.setattr(mcp_server, "_refresh_sqlite_integrity_status_locked", slow_probe)
+    monkeypatch.setattr(mcp_server, "_sqlite_integrity_checked", False)
+
+    background = threading.Thread(
+        target=mcp_server._refresh_sqlite_integrity_status, daemon=True
+    )
+    background.start()
+    assert probe_started.wait(5), "background probe never started"
+
+    consumer_done = threading.Event()
+
+    def consumer():
+        mcp_server._ensure_sqlite_integrity_status()
+        consumer_done.set()
+
+    consumer_thread = threading.Thread(target=consumer, daemon=True)
+    consumer_thread.start()
+    try:
+        assert not consumer_done.wait(0.3), "consumer bypassed the in-flight probe"
+        release_probe.set()
+        assert consumer_done.wait(5), "consumer never unblocked after the probe finished"
+        assert probe_calls == [1], "quick_check probe ran more than once"
+    finally:
+        release_probe.set()
+        background.join(5)
+        consumer_thread.join(5)

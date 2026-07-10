@@ -342,6 +342,11 @@ _last_request_time: float = time.monotonic()
 _sqlite_integrity_checked = False
 _sqlite_integrity_errors: list[str] = []
 _sqlite_integrity_check_error = ""
+# Serializes quick_check runs between the async startup preflight thread and
+# lazy consumers on the protocol thread (double-checked in
+# _ensure_sqlite_integrity_status) so the O(database size) probe never runs
+# twice concurrently.
+_sqlite_integrity_refresh_lock = threading.Lock()
 _SQLITE_INTEGRITY_ERROR_CODE = -32002
 _SQLITE_INTEGRITY_ALLOWED_TOOLS = frozenset({
     "mempalace_status",
@@ -534,6 +539,12 @@ def _refresh_sqlite_integrity_status() -> None:
     SQLite-layer corruption (#1818).
     """
 
+    with _sqlite_integrity_refresh_lock:
+        _refresh_sqlite_integrity_status_locked()
+
+
+def _refresh_sqlite_integrity_status_locked() -> None:
+    # Probe body; callers must hold _sqlite_integrity_refresh_lock.
     global _sqlite_integrity_checked
     global _sqlite_integrity_errors
     global _sqlite_integrity_check_error
@@ -600,8 +611,14 @@ def _refresh_sqlite_integrity_status() -> None:
 
 
 def _ensure_sqlite_integrity_status() -> None:
-    if not _sqlite_integrity_checked:
-        _refresh_sqlite_integrity_status()
+    if _sqlite_integrity_checked:
+        return
+    with _sqlite_integrity_refresh_lock:
+        # Double-checked: the startup preflight thread may have finished the
+        # probe while this caller waited on the lock — don't pay the
+        # O(database size) quick_check twice.
+        if not _sqlite_integrity_checked:
+            _refresh_sqlite_integrity_status_locked()
 
 
 def _sqlite_integrity_payload() -> dict:
@@ -5379,6 +5396,21 @@ def _serve_http(host: str, port: int) -> None:
             logger.info("MemPalace MCP HTTP server shutting down")
 
 
+def _startup_preflight() -> None:
+    """Startup SQLite integrity + HNSW capacity probes, off the protocol thread.
+
+    Runs the same checks the stdio loop used to run synchronously before
+    reading the first request. Failures must never take down the server: the
+    lazy consumers (_ensure_sqlite_integrity_status, _get_client) re-run or
+    re-check on demand, so an exception here only loses the early warning.
+    """
+    try:
+        _ensure_sqlite_integrity_status()
+        _refresh_vector_disabled_flag()
+    except Exception:
+        logger.exception("startup preflight failed")
+
+
 def _run_stdio_loop() -> None:
     _restore_stdout()
 
@@ -5395,11 +5427,19 @@ def _run_stdio_loop() -> None:
 
     logger.info("MemPalace MCP Server starting...")
 
-    # Pre-flight: probe HNSW capacity before any tool call so the warning
-    # is visible at startup rather than on first use (#1222). Pure
-    # filesystem read; never opens a chromadb client.
-    _refresh_sqlite_integrity_status()
-    _refresh_vector_disabled_flag()
+    # Pre-flight in a background thread: PRAGMA quick_check reads every page
+    # of chroma.sqlite3 (20s+ on multi-GB palaces) and running it before the
+    # protocol loop starves the client's initialize timeout, even though the
+    # handshake itself never touches the database. The #1222 intent (warnings
+    # visible at startup rather than on first use) is preserved — the probe
+    # starts now and logs as soon as it finishes; tool calls that need the
+    # verdict serialize on _sqlite_integrity_refresh_lock via
+    # _ensure_sqlite_integrity_status instead of re-running the probe.
+    threading.Thread(
+        target=_startup_preflight,
+        name="mcp-startup-preflight",
+        daemon=True,
+    ).start()
 
     # Opt-in: pre-load the embedder so the first chromadb-write tool call
     # does not pay the ONNX/CoreML cold-load tax under the MCP client
