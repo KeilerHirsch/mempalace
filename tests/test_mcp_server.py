@@ -5397,9 +5397,7 @@ def test_ensure_sqlite_integrity_status_joins_inflight_probe(monkeypatch):
     monkeypatch.setattr(mcp_server, "_refresh_sqlite_integrity_status_locked", slow_probe)
     monkeypatch.setattr(mcp_server, "_sqlite_integrity_checked", False)
 
-    background = threading.Thread(
-        target=mcp_server._refresh_sqlite_integrity_status, daemon=True
-    )
+    background = threading.Thread(target=mcp_server._refresh_sqlite_integrity_status, daemon=True)
     background.start()
     assert probe_started.wait(5), "background probe never started"
 
