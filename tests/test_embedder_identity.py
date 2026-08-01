@@ -265,6 +265,36 @@ def test_set_palace_identity_override_requires_force(tmp_path, monkeypatch, clea
     assert old.model_name == "minilm" and new.model_name == "embeddinggemma"
 
 
+def test_set_palace_identity_read_failure_requires_force(
+    tmp_path, monkeypatch, clear_identity_cache
+):
+    """Regression: a crashed read of the stored identity must NOT be treated
+    as 'nothing recorded'. Before the fix, `except Exception: old = None`
+    let a transient read error bypass the mismatch guard and silently
+    overwrite a possibly different, incompatible embedder identity."""
+    monkeypatch.setenv("MEMPALACE_BACKEND", "sqlite_exact")
+    monkeypatch.setenv("MEMPALACE_EMBEDDING_MODEL", "minilm")
+    from mempalace import palace as P
+
+    _seed_sqlite_with_identity(tmp_path, "minilm")
+
+    def _boom(self):
+        raise RuntimeError("sidecar read failed")
+
+    monkeypatch.setattr(
+        "mempalace.backends.sqlite_exact.SQLiteExactCollection.get_stored_embedder_identity",
+        _boom,
+    )
+
+    # Without force: a read failure must refuse the write, same as a known mismatch.
+    with pytest.raises(EmbedderIdentityMismatchError, match="sidecar read failed"):
+        P.set_palace_embedder_identity(str(tmp_path), model="embeddinggemma", force=False)
+
+    # With force: the operator has explicitly accepted the risk, proceed.
+    old, new = P.set_palace_embedder_identity(str(tmp_path), model="embeddinggemma", force=True)
+    assert old is None and new.model_name == "embeddinggemma"
+
+
 def test_set_palace_identity_empty_target_raises(tmp_path, monkeypatch):
     # No model given and none configured: recording is a no-op in every backend,
     # so refuse rather than claim a phantom success.

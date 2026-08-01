@@ -39,13 +39,13 @@ Programmatic search returning a dict. Used by the MCP server.
     "filters": {"wing": str | None, "room": str | None},
     "results": [
         {
-            "text": str,           # verbatim drawer content
-            "wing": str,           # wing name
-            "room": str,           # room name
-            "source_file": str,    # original file basename
-            "similarity": float,   # 0.0 to 1.0
+            "text": str,  # verbatim drawer content
+            "wing": str,  # wing name
+            "room": str,  # room name
+            "source_file": str,  # original file basename
+            "similarity": float,  # 0.0 to 1.0
         }
-    ]
+    ],
 }
 ```
 

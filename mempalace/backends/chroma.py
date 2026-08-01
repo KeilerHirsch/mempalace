@@ -1,6 +1,7 @@
 """ChromaDB-backed MemPalace storage backend (RFC 001 reference implementation)."""
 
 import contextlib
+import ctypes
 import datetime as _dt
 import json
 import logging
@@ -514,6 +515,86 @@ def _vector_segment_id(palace_path: str, collection_name: str) -> Optional[str]:
         return None
 
 
+def _metadata_segment_id(palace_path: str, collection_name: str) -> Optional[str]:
+    """Return the METADATA segment UUID for ``collection_name`` or ``None``.
+
+    Mirrors :func:`_vector_segment_id`. The two segments for one collection
+    have independent UUIDs (chromadb assigns one VECTOR + one METADATA
+    segment per collection) — never assume they share an id, and never
+    assume a segment's ``embeddings.id`` rowid lines up with the other
+    collection's HNSW labels: ``embeddings.id`` is a single autoincrement
+    sequence shared across every collection's rows in ``chroma.sqlite3``,
+    while each collection's HNSW label space independently starts at 0.
+    Measured directly against a live 323k+/24k two-collection palace:
+    naively comparing raw ``embeddings.id`` to raw HNSW label produced a
+    ~99.4%/0% "mismatch" rate depending on which collection was checked,
+    entirely an artifact of the shared-vs-per-collection counter mismatch,
+    not real divergence. The SPARK guard consumes ``embedding_id`` (the
+    stable, collection-scoped string) as the join key instead — see
+    :func:`hnsw_capacity_status`'s consistency block.
+    """
+    db_path = os.path.join(palace_path, "chroma.sqlite3")
+    if not os.path.isfile(db_path):
+        return None
+    try:
+        conn = sqlite3.connect(sqlite_read_uri(db_path), uri=True)
+        try:
+            row = conn.execute(
+                """
+                SELECT s.id
+                FROM segments s
+                JOIN collections c ON s.collection = c.id
+                WHERE c.name = ? AND s.scope = 'METADATA'
+                LIMIT 1
+                """,
+                (collection_name,),
+            ).fetchone()
+            return row[0] if row else None
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return None
+
+
+def _sqlite_embedding_ids(palace_path: str, metadata_segment_id: str) -> Optional[set[str]]:
+    """Return the set of ``embedding_id`` strings for one METADATA segment.
+
+    This is the sqlite side of the consistency guard's join key: chromadb's
+    ``embeddings.embedding_id`` (a stable, user-facing, collection-scoped
+    string) matches 1:1 against the HNSW pickle's ``id_to_label`` keys for
+    the same collection — see :func:`_metadata_segment_id`'s docstring for
+    why the raw sqlite rowid / HNSW label integers do NOT line up directly.
+    """
+    db_path = os.path.join(palace_path, "chroma.sqlite3")
+    if not os.path.isfile(db_path):
+        return None
+    try:
+        conn = sqlite3.connect(sqlite_read_uri(db_path), uri=True)
+        try:
+            rows = conn.execute(
+                "SELECT embedding_id FROM embeddings WHERE segment_id = ?",
+                (metadata_segment_id,),
+            ).fetchall()
+            return {r[0] for r in rows}
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return None
+
+
+def _hnsw_id_to_label_keys(palace_path: str, vector_segment_id: str) -> Optional[set[str]]:
+    """Return the set of ``id_to_label`` keys from one segment's HNSW pickle.
+
+    Thin wrapper over :func:`_hnsw_id_to_label` (shared with
+    :func:`_hnsw_element_count` so the pickle is parsed once per
+    ``hnsw_capacity_status`` call, not once per caller). The consistency
+    guard needs the actual key set to compare against
+    :func:`_sqlite_embedding_ids`.
+    """
+    id_to_label = _hnsw_id_to_label(palace_path, vector_segment_id)
+    return set(id_to_label.keys()) if id_to_label is not None else None
+
+
 class _PersistentDataStub:
     """Minimal stand-in for chromadb's ``PersistentData`` during safe unpickling.
 
@@ -553,14 +634,12 @@ class _SafePersistentDataUnpickler:
     arbitrary classes during deserialization.
     """
 
-    _ALLOWED = frozenset(
-        {
-            (
-                "chromadb.segment.impl.vector.local_persistent_hnsw",
-                "PersistentData",
-            ),
-        }
-    )
+    _ALLOWED = frozenset({
+        (
+            "chromadb.segment.impl.vector.local_persistent_hnsw",
+            "PersistentData",
+        ),
+    })
 
     @classmethod
     def load(cls, path: str):
@@ -576,28 +655,28 @@ class _SafePersistentDataUnpickler:
             return _Restricted(f).load()
 
 
-def _hnsw_element_count(palace_path: str, segment_id: str) -> Optional[int]:
-    """Return the element count chromadb thinks the HNSW segment holds.
+def _hnsw_id_to_label(palace_path: str, segment_id: str) -> Optional[dict]:
+    """Return the raw ``id_to_label`` dict from one segment's HNSW pickle.
 
-    Reads ``index_metadata.pickle`` via a tight-allowlist unpickler and
-    counts ``id_to_label`` entries. This is the count chromadb consults
-    when sizing/loading the HNSW index on next open — distinct from
-    hnswlib's internal ``cur_element_count`` in the binary files. For
-    #1222's divergence check this is the number that matters, because it
-    is what gets compared against ``count() * resize_factor`` when
-    chromadb decides whether to resize HNSW on load.
+    Shared by :func:`_hnsw_element_count` (needs only ``len()``) and
+    :func:`_hnsw_id_to_label_keys` (needs the key set) so a
+    ``hnsw_capacity_status`` call unpickles ``index_metadata.pickle``
+    once, not twice — the file can hold hundreds of thousands of entries
+    on a large palace, so re-parsing it per caller is real, avoidable
+    cost even though it's far cheaper than chromadb's own cold HNSW load.
 
-    Uses :class:`_SafePersistentDataUnpickler` rather than chromadb's own
-    ``PersistentData.load_from_file`` so the probe works even when
-    ``hnswlib`` is not installed (chromadb's persistent_hnsw module
-    imports hnswlib at module load — a probe that requires hnswlib would
-    refuse to run in environments where the segfault risk is moot
-    anyway). The allowlisted unpickler is also the safer default: the
-    pickle file is owned by the same user, but a tighter trust boundary
-    costs us nothing.
+    Reads via a tight-allowlist unpickler (:class:`_SafePersistentDataUnpickler`)
+    rather than chromadb's own ``PersistentData.load_from_file`` so the
+    probe works even when ``hnswlib`` is not installed (chromadb's
+    persistent_hnsw module imports hnswlib at module load — a probe that
+    requires hnswlib would refuse to run in environments where the
+    segfault risk is moot anyway). The allowlisted unpickler is also the
+    safer default: the pickle file is owned by the same user, but a
+    tighter trust boundary costs us nothing.
 
     Returns ``None`` when the file is absent (fresh / never-flushed
-    segment) or the unpickle fails. Callers treat ``None`` as "unknown".
+    segment), the unpickle fails, or ``id_to_label`` isn't a dict.
+    Callers treat ``None`` as "unknown".
     """
     pickle_path = os.path.join(palace_path, segment_id, "index_metadata.pickle")
     if not os.path.isfile(pickle_path):
@@ -613,11 +692,25 @@ def _hnsw_element_count(palace_path: str, segment_id: str) -> Optional[int]:
         else:
             id_to_label = getattr(pd, "id_to_label", None)
         if isinstance(id_to_label, dict):
-            return len(id_to_label)
+            return id_to_label
         return None
-    except Exception:
-        logger.debug("_hnsw_element_count failed for %s", pickle_path, exc_info=True)
+    except Exception:  # noqa: BLE001 - probe returns None, callers treat as "unknown"
+        logger.debug("_hnsw_id_to_label failed for %s", pickle_path, exc_info=True)
         return None
+
+
+def _hnsw_element_count(palace_path: str, segment_id: str) -> Optional[int]:
+    """Return the element count chromadb thinks the HNSW segment holds.
+
+    Thin wrapper over :func:`_hnsw_id_to_label`. This is the count
+    chromadb consults when sizing/loading the HNSW index on next open —
+    distinct from hnswlib's internal ``cur_element_count`` in the binary
+    files. For #1222's divergence check this is the number that matters,
+    because it is what gets compared against ``count() * resize_factor``
+    when chromadb decides whether to resize HNSW on load.
+    """
+    id_to_label = _hnsw_id_to_label(palace_path, segment_id)
+    return len(id_to_label) if id_to_label is not None else None
 
 
 # Divergence threshold: chromadb's HNSW flushes asynchronously, so HNSW
@@ -683,7 +776,7 @@ def _read_sync_threshold(palace_path: str, collection_name: str) -> int:
             return 1000
         finally:
             conn.close()
-    except Exception:
+    except Exception:  # noqa: BLE001 - falls back to chromadb's documented default (1000)
         logger.debug("_read_sync_threshold failed", exc_info=True)
         return 1000
 
@@ -712,7 +805,7 @@ def _collection_has_sync_threshold_metadata(palace_path: str, collection_name: s
             return row is not None
         finally:
             conn.close()
-    except Exception:
+    except Exception:  # noqa: BLE001 - False fallback only affects divergence-floor branch
         logger.debug("_collection_has_sync_threshold_metadata failed", exc_info=True)
         return False
 
@@ -724,6 +817,155 @@ def _hnsw_metadata_age_seconds(palace_path: str, segment_id: str) -> Optional[fl
     try:
         return max(0.0, time.time() - os.path.getmtime(pickle_path))
     except OSError:
+        return None
+
+
+_SPARK_GUARD_NOT_ATTEMPTED = object()  # sentinel: _load_spark_guard() hasn't run yet
+_SPARK_GUARD_LIB: object = _SPARK_GUARD_NOT_ATTEMPTED  # tri-state: sentinel | None | CDLL
+
+
+def _load_spark_guard() -> Optional[ctypes.CDLL]:
+    """Load the proved SPARK consistency-guard DLL, or None if unavailable.
+
+    Cached at module scope after the first attempt (success or failure) —
+    this is a probe called on every :func:`hnsw_capacity_status` invocation,
+    so a missing/unbuildable DLL should not re-attempt the load (and repeat
+    the same failing ``add_dll_directory``/``CDLL`` calls) every time. The
+    tri-state cache (sentinel = not attempted, ``None`` = attempted and
+    failed, ``CDLL`` = loaded) uses a dedicated sentinel object rather than
+    ``False`` so the state a caller can be in is never confusable with a
+    real (falsy-looking) return value.
+
+    Never raises. The guard is defense-in-depth on top of the existing
+    count-based divergence check, not a replacement — a palace without the
+    DLL built (non-Windows, or the guard simply not built yet) still gets
+    the count check, just not the stronger set-equality one.
+    """
+    global _SPARK_GUARD_LIB
+    if _SPARK_GUARD_LIB is not _SPARK_GUARD_NOT_ATTEMPTED:
+        return _SPARK_GUARD_LIB  # type: ignore[return-value]  # narrowed to CDLL|None by the check above
+
+    dll_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "guard", "spark", "lib", "libguard.dll"
+    )
+    dll_path = os.path.normpath(dll_path)
+    if not os.path.isfile(dll_path):
+        _SPARK_GUARD_LIB = None
+        return None
+
+    try:
+        # Windows-only gotcha (see alire-spark-windows-setup-gotchas): PATH
+        # does not drive dependent-DLL search since Python 3.8, so the GNAT
+        # runtime DLLs (libgnat-*.dll, libgcc_s_seh-1.dll) must be found via
+        # add_dll_directory or the first call crashes with a WinError, not
+        # a catchable Python exception.
+        runtime_dir = os.path.join(os.path.expanduser("~"), ".alire", "libexec", "spark", "bin")
+        if hasattr(os, "add_dll_directory") and os.path.isdir(runtime_dir):
+            os.add_dll_directory(runtime_dir)
+
+        lib = ctypes.CDLL(dll_path)
+        lib.check_consistency.restype = ctypes.c_int
+        lib.check_consistency.argtypes = [
+            ctypes.POINTER(ctypes.c_int64),
+            ctypes.c_int,
+            ctypes.POINTER(ctypes.c_int64),
+            ctypes.c_int,
+        ]
+        lib.read_gate.restype = ctypes.c_int
+        lib.read_gate.argtypes = [ctypes.c_int]
+    except OSError:
+        logger.debug("_load_spark_guard: failed to load %s", dll_path, exc_info=True)
+        _SPARK_GUARD_LIB = None
+        return None
+
+    _SPARK_GUARD_LIB = lib
+    return lib
+
+
+def _int64_array(vals: list[int]):
+    """Sorted+deduped int64 ctypes buffer + length, as the guard expects.
+
+    Mirrors the SPARK guard's own PoC fixture (guard/spark/fixture.py's
+    ``_arr``) — same empty-set-as-(NULL,0) convention, same explicit
+    range validation instead of trusting ctypes' silent two's-complement
+    wraparound on out-of-range input (a real bug caught by ECC review in
+    the fixture; fixed there and mirrored here from the start).
+    """
+    clean = sorted(set(vals))
+    for v in clean:
+        if not (-(2**63) <= v <= 2**63 - 1):
+            raise ValueError(f"label {v} out of signed int64 range")
+    n = len(clean)
+    if n == 0:
+        return None, ctypes.POINTER(ctypes.c_int64)(), 0
+    buf = (ctypes.c_int64 * n)(*clean)
+    ptr = ctypes.cast(buf, ctypes.POINTER(ctypes.c_int64))
+    return buf, ptr, n
+
+
+def _spark_guard_check_consistency(
+    sqlite_ids: set[str], hnsw_ids: set[str]
+) -> Optional[dict[str, Any]]:
+    """Compare two ``embedding_id`` string sets via the proved SPARK guard.
+
+    The guard's C-ABI only speaks int64 labels, not strings (see
+    ``guard/spark/src/consistency_c.ads``). There is no direct numeric
+    identity between sqlite's ``embeddings.id`` rowid and HNSW's label —
+    measured directly: ``embeddings.id`` is one autoincrement sequence
+    shared across every collection in ``chroma.sqlite3``, while each
+    collection's HNSW label space independently starts at 0, so comparing
+    the raw integers directly is meaningless across collections and only
+    coincidentally close within one. Instead: build the sorted union of
+    both string sets, map each string to its rank in that union (a
+    bijection into ``0..N-1``, collision-free by construction, no hash
+    needed), and hand the two resulting sorted int64 rank-arrays to the
+    proved core. Set equality of the original strings is preserved exactly
+    by set equality of their ranks, since the rank mapping is injective.
+
+    Returns ``None`` (unknown — never raises) when the DLL isn't available
+    or the call fails for any reason; the caller falls back to the
+    existing count-based check. ``missing_ids`` lists are capped at 50
+    entries each to keep the payload bounded on a large palace — use the
+    ``*_count`` siblings for the true totals.
+    """
+    lib = _load_spark_guard()
+    if lib is None:
+        return None
+
+    try:
+        union = sorted(sqlite_ids | hnsw_ids)
+        rank = {s: i for i, s in enumerate(union)}
+        # KeyError is unreachable here: every id in sqlite_ids/hnsw_ids is
+        # in their union by construction, hence in rank. The broad except
+        # below is guarding the ctypes/FFI call, not this dict lookup.
+        sqlite_ranks = [rank[s] for s in sqlite_ids]
+        hnsw_ranks = [rank[s] for s in hnsw_ids]
+
+        _sb, sptr, slen = _int64_array(sqlite_ranks)
+        _hb, hptr, hlen = _int64_array(hnsw_ranks)
+
+        verdict = lib.check_consistency(sptr, slen, hptr, hlen)
+        if verdict not in (0, 1):
+            # -1 = malformed FFI call (our own bug, not a data finding) or
+            # any other value the guard never actually returns.
+            logger.debug("_spark_guard_check_consistency: guard returned %s", verdict)
+            return None
+
+        permitted = lib.read_gate(verdict) == 1
+        missing_from_hnsw = sorted(sqlite_ids - hnsw_ids)
+        missing_from_sqlite = sorted(hnsw_ids - sqlite_ids)
+        return {
+            "ok": verdict == 1,
+            "read_permitted": permitted,
+            "missing_ids": {
+                "in_sqlite_not_hnsw": missing_from_hnsw[:50],
+                "in_hnsw_not_sqlite": missing_from_sqlite[:50],
+                "in_sqlite_not_hnsw_count": len(missing_from_hnsw),
+                "in_hnsw_not_sqlite_count": len(missing_from_sqlite),
+            },
+        }
+    except Exception:  # noqa: BLE001 - guards the ctypes/FFI call (CDLL crash, ArgumentError); probe returns None, caller falls back to count check
+        logger.debug("_spark_guard_check_consistency failed", exc_info=True)
         return None
 
 
@@ -765,7 +1007,7 @@ def _stat_signature(path: str) -> tuple[int, int, int]:
     """
     try:
         st = os.stat(path)
-    except Exception:
+    except Exception:  # noqa: BLE001 - docstring: catches ValueError (null byte) too, not just OSError
         return (0, 0, 0)
     return (st.st_ino, st.st_mtime_ns, st.st_size)
 
@@ -803,7 +1045,7 @@ def _segment_id_safe(palace_path: str, collection_name: str) -> Optional[str]:
     """``_vector_segment_id`` that never raises, for the pre-probe signature."""
     try:
         return _vector_segment_id(palace_path, collection_name)
-    except Exception:
+    except Exception:  # noqa: BLE001 - docstring: "never raises" for the pre-probe signature
         return None
 
 
@@ -833,7 +1075,11 @@ def reset_hnsw_capacity_cache() -> None:
     _capacity_cache.clear()
 
 
-def hnsw_capacity_status(palace_path: str, collection_name: str = "mempalace_drawers") -> dict:
+def hnsw_capacity_status(
+    palace_path: str,
+    collection_name: str = "mempalace_drawers",
+    include_consistency_check: bool = False,
+) -> dict:
     """Compare sqlite embedding count against HNSW element count.
 
     The #1222 failure mode: ``max_elements`` froze at 16 384 while sqlite
@@ -851,6 +1097,26 @@ def hnsw_capacity_status(palace_path: str, collection_name: str = "mempalace_dra
     * ``diverged``         — True when divergence exceeds the threshold
     * ``status``           — ``"ok"`` | ``"diverged"`` | ``"unknown"``
     * ``message``          — human-readable summary
+    * ``consistency``      — ``{ok, read_permitted, missing_ids}`` from the
+      proved SPARK guard's set-equality check, or ``None`` when
+      ``include_consistency_check`` is ``False`` (the default) or the guard
+      DLL isn't built/available. This is a stronger, additive signal on top
+      of the count-based ``diverged`` check above: two id sets can have
+      equal *counts* while differing in *members* (chromadb recycles labels
+      via upsert/delete), which the count check alone cannot see. Advisory
+      only in this phase — ``diverged``/``status`` above still drive the
+      existing fallback-to-BM25 decision; nothing yet gates reads solely
+      on ``consistency.read_permitted``.
+
+    ``include_consistency_check`` defaults to ``False`` because building
+    both id sets (a full ``embeddings`` table scan plus a full HNSW pickle
+    unpickle) is O(sqlite_count + hnsw_count) — measured at ~75s on a real
+    323k-element palace, against sub-second for the count-only check above.
+    This function is called on every MCP server boot
+    (:func:`mempalace.mcp_server._refresh_vector_disabled_flag`) and must
+    stay fast there; pass ``True`` only from an explicit, user-triggered
+    diagnostic path (e.g. a dedicated "deep check" tool/CLI command), never
+    from a startup or per-request hot path.
 
     Never raises — a probe that throws would defeat the point.
 
@@ -876,7 +1142,12 @@ def hnsw_capacity_status(palace_path: str, collection_name: str = "mempalace_dra
     re-running the probe costs milliseconds, whereas serving one stale verdict
     can route a query into a diverged segment.
     """
-    key = (palace_path, collection_name)
+    # include_consistency_check is part of the cache key: a cached verdict
+    # computed without the SPARK guard (the common, fast, boot-path case)
+    # must never be handed back to a caller that explicitly opted into the
+    # expensive check, or vice versa — either direction would silently
+    # return the wrong shape of result (missing or stale `consistency`).
+    key = (palace_path, collection_name, include_consistency_check)
     cached = _capacity_cache.get(key)
     if cached is not None:
         fingerprint, cached_segment, status, probed_at = cached
@@ -891,7 +1162,7 @@ def hnsw_capacity_status(palace_path: str, collection_name: str = "mempalace_dra
     # (sqlite OR the pickle) fall through uncached rather than pin a verdict
     # the disk no longer supports.
     before = _capacity_fingerprint(palace_path, _segment_id_safe(palace_path, collection_name))
-    out = _hnsw_capacity_status_uncached(palace_path, collection_name)
+    out = _hnsw_capacity_status_uncached(palace_path, collection_name, include_consistency_check)
     segment_id = out.get("segment_id")
     after = _capacity_fingerprint(palace_path, segment_id)
     cacheable = (
@@ -914,7 +1185,9 @@ def hnsw_capacity_status(palace_path: str, collection_name: str = "mempalace_dra
 
 
 def _hnsw_capacity_status_uncached(
-    palace_path: str, collection_name: str = "mempalace_drawers"
+    palace_path: str,
+    collection_name: str = "mempalace_drawers",
+    include_consistency_check: bool = False,
 ) -> dict:
     """Run the capacity probe, bypassing the cache. See :func:`hnsw_capacity_status`."""
     out: dict[str, Any] = {
@@ -925,6 +1198,7 @@ def _hnsw_capacity_status_uncached(
         "diverged": False,
         "status": "unknown",
         "message": "",
+        "consistency": None,
     }
 
     try:
@@ -963,6 +1237,17 @@ def _hnsw_capacity_status_uncached(
                 "leaving vector search enabled"
             )
             return out
+
+        if include_consistency_check:
+            metadata_seg_id = _metadata_segment_id(palace_path, collection_name)
+            sqlite_ids = (
+                _sqlite_embedding_ids(palace_path, metadata_seg_id)
+                if metadata_seg_id is not None
+                else None
+            )
+            hnsw_ids = _hnsw_id_to_label_keys(palace_path, seg_id)
+            if sqlite_ids is not None and hnsw_ids is not None:
+                out["consistency"] = _spark_guard_check_consistency(sqlite_ids, hnsw_ids)
 
         divergence = sqlite_count - hnsw_count
         out["divergence"] = divergence
@@ -1013,7 +1298,7 @@ def _hnsw_capacity_status_uncached(
             if divergence < 0:
                 out["message"] += " (HNSW has extra flushed elements; treating as safe)"
 
-    except Exception:
+    except Exception:  # noqa: BLE001 - docstring: "Never raises" — a throwing probe defeats the point
         logger.debug("hnsw_capacity_status failed", exc_info=True)
         out["message"] = "HNSW capacity probe raised; skipping"
     return out
@@ -1160,7 +1445,7 @@ def _pin_hnsw_threads(collection) -> None:
         collection.modify(
             configuration=UpdateCollectionConfiguration(hnsw=UpdateHNSWConfiguration(num_threads=1))
         )
-    except Exception:
+    except Exception:  # noqa: BLE001 - best-effort retrofit of thread-safety setting
         logger.debug("_pin_hnsw_threads modify failed", exc_info=True)
 
 
@@ -1267,7 +1552,7 @@ def quarantine_invalid_hnsw_metadata(palace_path: str) -> list[str]:
                 )
                 continue
             reason = f"invalid index_metadata.pickle: {exc}"
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - try-block is one unpickle call; quarantined + logged below
             reason = f"invalid index_metadata.pickle: {exc}"
         else:
             if not isinstance(persisted, dict) and not (
@@ -1476,7 +1761,7 @@ def _close_client(client) -> None:
         return
     try:
         client.close()
-    except Exception:
+    except Exception:  # noqa: BLE001 - swallow otherwise, explicit forward-compat cleanup
         logger.debug("client.close() unavailable or failed", exc_info=True)
 
 
@@ -2083,17 +2368,15 @@ class ChromaBackend(BaseBackend):
     """
 
     name = "chroma"
-    capabilities = frozenset(
-        {
-            "supports_embeddings_in",
-            "supports_embeddings_passthrough",
-            "supports_embeddings_out",
-            "supports_metadata_filters",
-            "supports_contains_fast",
-            "supports_lexical_search",
-            "local_mode",
-        }
-    )
+    capabilities = frozenset({
+        "supports_embeddings_in",
+        "supports_embeddings_passthrough",
+        "supports_embeddings_out",
+        "supports_metadata_filters",
+        "supports_contains_fast",
+        "supports_lexical_search",
+        "local_mode",
+    })
 
     def __init__(self):
         # palace_path -> PersistentClient
@@ -2138,7 +2421,7 @@ class ChromaBackend(BaseBackend):
             from ..config import MempalaceConfig
 
             current_model = MempalaceConfig().embedding_model
-        except Exception:
+        except Exception:  # noqa: BLE001 - cosmetic fallback for error-message text only
             current_model = "unknown"
         rebuild_cmd = f"mempalace --palace {shlex.quote(palace_path)} repair rebuild-index"
         return (

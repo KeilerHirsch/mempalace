@@ -60,7 +60,7 @@ class Layer0:
             return self._text
 
         if os.path.exists(self.path):
-            with open(self.path, "r") as f:
+            with open(self.path, "r", encoding="utf-8") as f:
                 self._text = f.read().strip()
         else:
             self._text = (
@@ -98,7 +98,7 @@ class Layer1:
         """Pull top drawers from ChromaDB and format as compact L1 text."""
         try:
             col = _get_collection(self.palace_path, create=False)
-        except Exception:
+        except Exception:  # noqa: BLE001 - expected "No palace found" hint returned to caller
             return "## L1 — No palace found. Run: mempalace mine <dir>"
 
         # Fetch all drawers in batches to avoid SQLite variable limit (~999)
@@ -111,7 +111,16 @@ class Layer1:
                 kwargs["where"] = {"wing": self.wing}
             try:
                 batch = col.get(**kwargs)
-            except Exception:
+            except Exception:  # noqa: BLE001 - paginate fetch failed, truncate context
+                # A page fetch failed mid-pagination: stop scanning and build L1
+                # from the drawers gathered so far (truncated context).
+                import logging
+
+                logging.getLogger("mempalace_mcp").warning(
+                    "layers L1 batch fetch failed at offset %d; truncating scan",
+                    offset,
+                    exc_info=True,
+                )
                 break
             batch_docs = batch.get("documents", [])
             batch_metas = batch.get("metadatas", [])
@@ -217,7 +226,7 @@ class Layer2:
         """Retrieve drawers filtered by wing and/or room."""
         try:
             col = _get_collection(self.palace_path, create=False)
-        except Exception:
+        except Exception:  # noqa: BLE001 - expected condition, message accurate to caller
             return "No palace found."
 
         where = build_where_filter(wing, room)
@@ -228,7 +237,7 @@ class Layer2:
 
         try:
             results = col.get(**kwargs)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - surfaced to caller, not swallowed
             return f"Retrieval error: {e}"
 
         docs = results.get("documents", [])
@@ -276,7 +285,7 @@ class Layer3:
         """Semantic search, returns compact result text."""
         try:
             col = _get_collection(self.palace_path, create=False)
-        except Exception:
+        except Exception:  # noqa: BLE001 - expected condition, accurately reported
             return "No palace found."
 
         where = build_where_filter(wing, room)
@@ -291,7 +300,7 @@ class Layer3:
 
         try:
             results = col.query(**kwargs)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - surfaced to caller as search error
             return f"Search error: {e}"
 
         docs = _first_or_empty(results, "documents")
@@ -331,7 +340,7 @@ class Layer3:
         """Return raw dicts instead of formatted text."""
         try:
             col = _get_collection(self.palace_path, create=False)
-        except Exception:
+        except Exception:  # noqa: BLE001 - matches documented "raw dicts" list contract
             return []
 
         where = build_where_filter(wing, room)
@@ -346,7 +355,7 @@ class Layer3:
 
         try:
             results = col.query(**kwargs)
-        except Exception:
+        except Exception:  # noqa: BLE001 - caller reads [] as "no results"
             return []
 
         metric = _metric_for_collection(col)
@@ -363,16 +372,14 @@ class Layer3:
             # storage fields show their fallback where content is missing.
             meta = meta or {}
             doc = doc or ""
-            hits.append(
-                {
-                    "text": doc,
-                    "wing": meta.get("wing", "unknown"),
-                    "room": meta.get("room", "unknown"),
-                    "source_file": Path(meta.get("source_file", "?")).name,
-                    "similarity": round(_distance_to_similarity(dist, metric), 3),
-                    "metadata": meta,
-                }
-            )
+            hits.append({
+                "text": doc,
+                "wing": meta.get("wing", "unknown"),
+                "room": meta.get("room", "unknown"),
+                "source_file": Path(meta.get("source_file", "?")).name,
+                "similarity": round(_distance_to_similarity(dist, metric), 3),
+                "metadata": meta,
+            })
         return hits
 
 
@@ -455,7 +462,7 @@ class MemoryStack:
             col = _get_collection(self.palace_path, create=False)
             count = col.count()
             result["total_drawers"] = count
-        except Exception:
+        except Exception:  # noqa: BLE001 - best-effort summary, defaults to 0
             result["total_drawers"] = 0
 
         return result

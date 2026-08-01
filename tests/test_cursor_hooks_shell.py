@@ -112,42 +112,36 @@ def _stop_payload(
     loop_count: int = 0,
     transcript: str = "",
 ) -> str:
-    return json.dumps(
-        {
-            "conversation_id": conv,
-            "loop_count": loop_count,
-            "status": "completed",
-            "model": "claude-sonnet-4-20250514",
-            "hook_event_name": "stop",
-            "transcript_path": transcript,
-            "workspace_roots": ["/Users/test/sampleProj"],
-        }
-    )
+    return json.dumps({
+        "conversation_id": conv,
+        "loop_count": loop_count,
+        "status": "completed",
+        "model": "claude-sonnet-4-20250514",
+        "hook_event_name": "stop",
+        "transcript_path": transcript,
+        "workspace_roots": ["/Users/test/sampleProj"],
+    })
 
 
 def _precompact_payload(*, conv: str = "conv-1", transcript: str = "") -> str:
-    return json.dumps(
-        {
-            "conversation_id": conv,
-            "hook_event_name": "preCompact",
-            "trigger": "auto",
-            "transcript_path": transcript,
-            "workspace_roots": ["/Users/test/sampleProj"],
-        }
-    )
+    return json.dumps({
+        "conversation_id": conv,
+        "hook_event_name": "preCompact",
+        "trigger": "auto",
+        "transcript_path": transcript,
+        "workspace_roots": ["/Users/test/sampleProj"],
+    })
 
 
 def _session_start_payload(*, conv: str = "conv-1") -> str:
-    return json.dumps(
-        {
-            "conversation_id": conv,
-            "session_id": conv,
-            "hook_event_name": "sessionStart",
-            "is_background_agent": False,
-            "composer_mode": "agent",
-            "workspace_roots": ["/Users/test/sampleProj"],
-        }
-    )
+    return json.dumps({
+        "conversation_id": conv,
+        "session_id": conv,
+        "hook_event_name": "sessionStart",
+        "is_background_agent": False,
+        "composer_mode": "agent",
+        "workspace_roots": ["/Users/test/sampleProj"],
+    })
 
 
 def _state_dir(home: Path) -> Path:
@@ -550,15 +544,13 @@ class TestWakeHook:
         # Cursor always provides workspace_roots, but the env-var
         # fallback path needs coverage so a future Cursor schema
         # change cannot silently break the wake hook.
-        payload = json.dumps(
-            {
-                "conversation_id": "conv-Z",
-                "session_id": "conv-Z",
-                "hook_event_name": "sessionStart",
-                "is_background_agent": False,
-                "composer_mode": "agent",
-            }
-        )
+        payload = json.dumps({
+            "conversation_id": "conv-Z",
+            "session_id": "conv-Z",
+            "hook_event_name": "sessionStart",
+            "is_background_agent": False,
+            "composer_mode": "agent",
+        })
         out, _ = _run_hook(
             WAKE_HOOK,
             payload,

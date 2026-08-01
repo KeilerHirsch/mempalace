@@ -64,14 +64,12 @@ def _clear_hook_routing_context(monkeypatch):
 def _write_transcript(path: Path, count: int = 3) -> None:
     path.write_text(
         "".join(
-            json.dumps(
-                {
-                    "message": {
-                        "role": "user",
-                        "content": f"message {index}",
-                    }
+            json.dumps({
+                "message": {
+                    "role": "user",
+                    "content": f"message {index}",
                 }
-            )
+            })
             + "\n"
             for index in range(count)
         ),

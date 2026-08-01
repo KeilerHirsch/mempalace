@@ -45,7 +45,7 @@ def _restore_stale_palace(palace_path: str, stale_path: str) -> None:
         if os.path.lexists(palace_path):
             shutil.rmtree(palace_path, ignore_errors=True)
         os.replace(stale_path, palace_path)
-    except Exception as err:
+    except Exception as err:  # noqa: BLE001 - rollback of last resort, prints paths for manual recovery
         print(
             f"  CRITICAL: rollback failed — original palace at {stale_path}, "
             f"partial migration data at {palace_path}. Restore manually. "
@@ -109,13 +109,11 @@ def extract_drawers_from_sqlite(db_path: str) -> list:
                 elif mr["bool_value"] is not None:
                     metadata[key] = bool(mr["bool_value"])
 
-            drawers.append(
-                {
-                    "id": embedding_id,
-                    "document": document,
-                    "metadata": metadata,
-                }
-            )
+            drawers.append({
+                "id": embedding_id,
+                "document": document,
+                "metadata": metadata,
+            })
 
     return drawers
 
@@ -211,7 +209,7 @@ def collection_write_roundtrip_works(col) -> bool:
             return False
 
         return True
-    except Exception:
+    except Exception:  # noqa: BLE001 - probe failure conservatively returns False, routes to rebuild
         return False
 
 
@@ -257,7 +255,7 @@ def migrate(palace_path: str, dry_run: bool = False, confirm: bool = False):
             f"\n Palace is readable by chromadb {target_version}, but write/delete verification failed."
         )
         print(" Rebuilding from SQLite to restore native write/delete behavior...")
-    except Exception:
+    except Exception:  # noqa: BLE001 - expected trigger for the SQL-extraction fallback path
         print(f"\n Palace is NOT readable by chromadb {target_version}.")
         print(" Extracting from SQLite directly...")
 
@@ -464,7 +462,8 @@ def _plan_topics_by_wing_renames():
         from .miner import _load_known_entities_raw
 
         reg = _load_known_entities_raw()
-    except Exception:
+    except Exception as exc:  # noqa: BLE001 - registry read failure printed to operator, plan degrades to empty
+        print(f"  Warning: could not read known_entities.json for wing-rename planning: {exc}")
         return {}
     tbw = reg.get("topics_by_wing")
     if not isinstance(tbw, dict):
@@ -487,7 +486,8 @@ def _apply_topics_by_wing_renames(renames):
 
     try:
         reg = _load_known_entities_raw()
-    except Exception:
+    except Exception as exc:  # noqa: BLE001 - registry read failure printed to operator, rename skipped
+        print(f"  Warning: could not read known_entities.json; wing-rename skipped: {exc}")
         return
     tbw = reg.get("topics_by_wing")
     if not isinstance(tbw, dict):
@@ -530,7 +530,7 @@ def migrate_wing_names(palace_path: str, dry_run: bool = False, confirm: bool = 
 
     try:
         drawers = get_collection(palace_path, create=False)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - missing/unreadable collection printed, returns False
         print(f"  No drawer collection found at {palace_path} ({exc}).")
         return False
 
@@ -543,7 +543,7 @@ def migrate_wing_names(palace_path: str, dry_run: bool = False, confirm: bool = 
     try:
         closets = get_closets_collection(palace_path, create=False)
         c_summary, c_updates = plan_wing_renames(_iter_collection_items(closets))
-    except Exception:
+    except Exception:  # noqa: BLE001 - closets collection optional, falls through to defaults
         closets = None
 
     topic_renames = _plan_topics_by_wing_renames()

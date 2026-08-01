@@ -631,7 +631,7 @@ class TestSyncPalace:
 
         cfg_dir = Path(synced_world["palace_path"]).parent / "cfg_for_cache_test"
         cfg_dir.mkdir(parents=True, exist_ok=True)
-        with open(cfg_dir / "config.json", "w") as f:
+        with open(cfg_dir / "config.json", "w", encoding="utf-8") as f:
             json.dump({"palace_path": synced_world["palace_path"]}, f)
         monkeypatch.setattr(mcp_server, "_config", MempalaceConfig(config_dir=str(cfg_dir)))
         monkeypatch.setattr(mcp_server, "_get_kg", lambda: kg)
@@ -883,7 +883,7 @@ class TestSyncPalace:
         lock_path = os.path.join(lock_dir, f"mine_palace_{palace_key}.lock")
         Path(lock_path).touch()
 
-        with open(lock_path, "r+") as lf:
+        with open(lock_path, "r+", encoding="utf-8") as lf:
             fcntl.flock(lf, fcntl.LOCK_EX | fcntl.LOCK_NB)
             try:
                 with pytest.raises(MineAlreadyRunning):
@@ -1214,7 +1214,7 @@ class TestSyncMcpTool:
 
         cfg_dir = Path(synced_world["palace_path"]).parent / "cfg_for_mcp_test"
         cfg_dir.mkdir(parents=True, exist_ok=True)
-        with open(cfg_dir / "config.json", "w") as f:
+        with open(cfg_dir / "config.json", "w", encoding="utf-8") as f:
             json.dump({"palace_path": synced_world["palace_path"]}, f)
         cfg = MempalaceConfig(config_dir=str(cfg_dir))
         self._patch(monkeypatch, cfg, kg)
@@ -1272,7 +1272,7 @@ class TestSyncMcpTool:
         # Wire MCP config at synced_world.
         cfg_dir = Path(synced_world["palace_path"]).parent / "cfg_for_lock_test"
         cfg_dir.mkdir(parents=True, exist_ok=True)
-        with open(cfg_dir / "config.json", "w") as f:
+        with open(cfg_dir / "config.json", "w", encoding="utf-8") as f:
             json.dump({"palace_path": synced_world["palace_path"]}, f)
         self._patch(monkeypatch, MempalaceConfig(config_dir=str(cfg_dir)), kg)
 
@@ -1284,7 +1284,7 @@ class TestSyncMcpTool:
         lock_path = os.path.join(lock_dir, f"mine_palace_{palace_key}.lock")
         Path(lock_path).touch()
 
-        with open(lock_path, "r+") as lf:
+        with open(lock_path, "r+", encoding="utf-8") as lf:
             fcntl.flock(lf, fcntl.LOCK_EX | fcntl.LOCK_NB)
             try:
                 result = mcp_server.tool_sync(

@@ -26,47 +26,43 @@ _BACKEND_ENV = "MEMPALACE_BACKEND"
 _PER_JOB_ENV = (_PALACE_PATH_ENV, _BACKEND_ENV, _EXPLICIT_BACKEND_ENV)
 
 
-READ_TOOLS = frozenset(
-    {
-        "mempalace_status",
-        "mempalace_list_wings",
-        "mempalace_list_rooms",
-        "mempalace_get_taxonomy",
-        "mempalace_get_aaak_spec",
-        "mempalace_traverse",
-        "mempalace_find_tunnels",
-        "mempalace_graph_stats",
-        "mempalace_list_tunnels",
-        "mempalace_list_hallways",
-        "mempalace_follow_tunnels",
-        "mempalace_search",
-        "mempalace_check_duplicate",
-        "mempalace_get_drawer",
-        "mempalace_list_drawers",
-        "mempalace_diary_read",
-        "mempalace_memories_filed_away",
-        "mempalace_kg_query",
-        "mempalace_kg_stats",
-        "mempalace_kg_timeline",
-    }
-)
+READ_TOOLS = frozenset({
+    "mempalace_status",
+    "mempalace_list_wings",
+    "mempalace_list_rooms",
+    "mempalace_get_taxonomy",
+    "mempalace_get_aaak_spec",
+    "mempalace_traverse",
+    "mempalace_find_tunnels",
+    "mempalace_graph_stats",
+    "mempalace_list_tunnels",
+    "mempalace_list_hallways",
+    "mempalace_follow_tunnels",
+    "mempalace_search",
+    "mempalace_check_duplicate",
+    "mempalace_get_drawer",
+    "mempalace_list_drawers",
+    "mempalace_diary_read",
+    "mempalace_memories_filed_away",
+    "mempalace_kg_query",
+    "mempalace_kg_stats",
+    "mempalace_kg_timeline",
+})
 
-WRITE_TOOLS = frozenset(
-    {
-        "mempalace_add_drawer",
-        "mempalace_checkpoint",
-        "mempalace_delete_by_source",
-        "mempalace_delete_drawer",
-        "mempalace_update_drawer",
-        "mempalace_diary_write",
-        "mempalace_kg_add",
-        "mempalace_kg_invalidate",
-        "mempalace_create_tunnel",
-        "mempalace_delete_tunnel",
-        "mempalace_delete_hallway",
-        "mempalace_hook_settings",
-    }
-)
+WRITE_TOOLS = frozenset({
+    "mempalace_add_drawer",
+    "mempalace_checkpoint",
+    "mempalace_delete_by_source",
+    "mempalace_delete_drawer",
+    "mempalace_update_drawer",
+    "mempalace_diary_write",
+    "mempalace_kg_add",
+    "mempalace_kg_invalidate",
+    "mempalace_create_tunnel",
+    "mempalace_delete_tunnel",
+    "mempalace_delete_hallway",
+    "mempalace_hook_settings",
+})
 
 MAINTENANCE_TOOLS = frozenset({"mempalace_mine", "mempalace_sync", "mempalace_reconnect"})
 
@@ -225,7 +221,7 @@ def run_mine(payload: dict[str, Any]) -> dict[str, Any]:
             "error_class": "SystemExit",
             "exit_code": code,
         }
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - RPC boundary, converts to structured error response
         return {"success": False, "error": f"mine failed: {exc}", "exit_code": 1}
 
     return {"success": True, "kind": "mine", "mode": mode, "dry_run": dry_run, "exit_code": 0}
@@ -248,7 +244,7 @@ def run_sync(payload: dict[str, Any]) -> dict[str, Any]:
 
     try:
         backend_name = resolve_backend_name(palace_path)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - RPC-boundary pattern around resolve_backend_name
         return {
             "success": False,
             "error": f"Could not resolve palace backend: {exc}",
@@ -304,7 +300,7 @@ def run_sync(payload: dict[str, Any]) -> dict[str, Any]:
         }
     except ValueError as exc:
         return {"success": False, "error": str(exc), "exit_code": 2}
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - RPC-boundary pattern around sync_palace
         return {"success": False, "error": f"sync failed: {exc}", "exit_code": 1}
 
     removed_suffix = "(would remove)" if dry_run else "(removed)"

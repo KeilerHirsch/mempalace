@@ -292,15 +292,14 @@ class TestLLMConfirmation:
         assert result.primary_platform is None
 
     def test_handles_malformed_llm_response(self):
-        """If the LLM returns garbage, fall back gracefully to the
-        conservative default (assume AI-dialogue with low confidence)."""
+        """If the LLM returns garbage, that is not evidence of AI-dialogue —
+        fall back to an honest unknown, never a fabricated positive verdict."""
         provider = _FakeProvider("not even close to JSON")
         result = detect_origin_llm(["sample text"], provider)
-        # Fallback: conservative default, low confidence
-        assert result.likely_ai_dialogue is True
-        assert result.confidence <= 0.5
+        assert result.likely_ai_dialogue is False
+        assert result.confidence == 0.0
         assert (
-            "fallback" in " ".join(result.evidence).lower()
+            "not valid json" in " ".join(result.evidence).lower()
             or "error" in " ".join(result.evidence).lower()
         )
 

@@ -349,12 +349,10 @@ _sqlite_integrity_check_error = ""
 # twice concurrently.
 _sqlite_integrity_refresh_lock = threading.Lock()
 _SQLITE_INTEGRITY_ERROR_CODE = -32002
-_SQLITE_INTEGRITY_ALLOWED_TOOLS = frozenset(
-    {
-        "mempalace_status",
-        "mempalace_reconnect",
-    }
-)
+_SQLITE_INTEGRITY_ALLOWED_TOOLS = frozenset({
+    "mempalace_status",
+    "mempalace_reconnect",
+})
 
 # The startup probe above runs PRAGMA quick_check, which reads every page of
 # chroma.sqlite3 and is therefore O(database size). On multi-GB palaces it can
@@ -383,24 +381,22 @@ _MCP_WRITER_LOCK_FAILED = False
 _MCP_WRITER_LOCK_ERROR = ""
 _MCP_ALLOW_PEER_WRITER_ENV = "MEMPALACE_MCP_ALLOW_PEER_WRITER"
 
-_MUTATING_TOOLS = frozenset(
-    {
-        "mempalace_kg_add",
-        "mempalace_kg_invalidate",
-        "mempalace_kg_supersede",
-        "mempalace_create_tunnel",
-        "mempalace_delete_tunnel",
-        "mempalace_delete_hallway",
-        "mempalace_add_drawer",
-        "mempalace_delete_drawer",
-        "mempalace_checkpoint",
-        "mempalace_delete_by_source",
-        "mempalace_mine",
-        "mempalace_sync",
-        "mempalace_update_drawer",
-        "mempalace_diary_write",
-    }
-)
+_MUTATING_TOOLS = frozenset({
+    "mempalace_kg_add",
+    "mempalace_kg_invalidate",
+    "mempalace_kg_supersede",
+    "mempalace_create_tunnel",
+    "mempalace_delete_tunnel",
+    "mempalace_delete_hallway",
+    "mempalace_add_drawer",
+    "mempalace_delete_drawer",
+    "mempalace_checkpoint",
+    "mempalace_delete_by_source",
+    "mempalace_mine",
+    "mempalace_sync",
+    "mempalace_update_drawer",
+    "mempalace_diary_write",
+})
 
 
 def _truthy_env(name: str) -> bool:
@@ -452,7 +448,7 @@ def _acquire_mcp_writer_lock() -> tuple[bool, str]:
             f"{_config.palace_path!r}: {exc}"
         )
         return False, _MCP_WRITER_LOCK_ERROR
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - lock failure logged, documented fail-open design
         _MCP_WRITER_LOCK_FAILED = True
         _MCP_WRITER_LOCK_ERROR = (
             "could not acquire MCP peer-writer lock for "
@@ -477,7 +473,19 @@ def _mcp_peer_writer_refusal(req_id, tool_name: str):
         return None
 
     ok, reason = _acquire_mcp_writer_lock()
-    if ok:
+
+    # ok=True with _MCP_WRITER_LOCK_FAILED set is the "fail-open" state: the
+    # lock *mechanism* itself errored (e.g. an msvcrt.locking OSError on
+    # Windows, where file locking is more fragile than POSIX flock), so the
+    # server kept running to stay available for reads. But a mutating write in
+    # that state runs with NO peer-writer lock — a concurrent `mempalace mine`
+    # can then race chromadb's non-process-safe HNSW persist and silently drop
+    # index entries (SQLite stays intact, so the loss is invisible until a
+    # divergence check runs). Refuse mutating tools while fail-open (unless the
+    # operator explicitly opts into unprotected writes) so writes fail closed
+    # instead of diverging the index in silence. Reads and status stay allowed.
+    fail_open = ok and _MCP_WRITER_LOCK_FAILED and not _truthy_env(_MCP_ALLOW_PEER_WRITER_ENV)
+    if ok and not fail_open:
         return None
 
     return {
@@ -575,11 +583,20 @@ def _refresh_sqlite_integrity_status_locked() -> None:
         from .repair import sqlite_integrity_errors
 
         errors = sqlite_integrity_errors(_config.palace_path)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - a crashed probe is "unknown", not "corrupt"
+        # The probe CRASHED — that tells us nothing about the data. Recording
+        # it in _sqlite_integrity_errors would report a probe failure to the
+        # operator as palace corruption (ok=False, error_count=1). Keep the
+        # two signals distinct: leave the errors list empty (integrity is
+        # unknown, not proven bad) and surface the crash only via the
+        # separate check_error field the status payload already carries.
+        logger.warning(
+            "sqlite integrity probe failed; integrity is UNKNOWN, not corrupt", exc_info=True
+        )
         _sqlite_integrity_check_error = (
             f"sqlite integrity probe failed: {type(exc).__name__}: {exc}"
         )
-        _sqlite_integrity_errors = [_sqlite_integrity_check_error]
+        _sqlite_integrity_errors = []
     else:
         _sqlite_integrity_errors = [str(error) for error in errors if str(error)]
         _sqlite_integrity_check_error = ""
@@ -619,7 +636,7 @@ def _sqlite_integrity_payload() -> dict:
     if not _sqlite_integrity_errors:
         try:
             backend_name = _selected_backend_name()
-        except Exception:
+        except Exception:  # noqa: BLE001 - only affects cosmetic "reason" string
             logger.debug("backend resolution failed for integrity payload", exc_info=True)
             backend_name = ""
         if backend_name != "chroma":
@@ -859,14 +876,14 @@ def _force_chroma_cache_reset() -> None:
 
         backend = get_backend_for_palace(_config.palace_path)
         backend.close_palace(PalaceRef(id=_config.palace_path, local_path=_config.palace_path))
-    except Exception:
+    except Exception:  # noqa: BLE001 - best-effort cache-clear step
         logger.debug("Failed to close cached Chroma backend during cache reset", exc_info=True)
     if cached_client is not None:
         try:
             close = getattr(cached_client, "close", None)
             if callable(close):
                 close()
-        except Exception:
+        except Exception:  # noqa: BLE001 - best-effort cleanup closing cached client
             logger.debug(
                 "Failed to close MCP-local Chroma client during cache reset", exc_info=True
             )
@@ -876,7 +893,7 @@ def _force_chroma_cache_reset() -> None:
         clear_system_cache = getattr(SharedSystemClient, "clear_system_cache", None)
         if callable(clear_system_cache):
             clear_system_cache()
-    except Exception:
+    except Exception:  # noqa: BLE001 - best-effort cleanup clearing shared system cache
         logger.debug("Failed to clear Chroma shared system cache during cache reset", exc_info=True)
 
 
@@ -911,7 +928,7 @@ def _refresh_vector_disabled_flag() -> None:
         return
     try:
         info = hnsw_capacity_status(_config.palace_path, _config.collection_name)
-    except Exception:
+    except Exception:  # noqa: BLE001 - documented "never raises"; logged at debug
         logger.debug("HNSW capacity probe raised", exc_info=True)
         return
     _vector_capacity_status = info
@@ -1270,8 +1287,10 @@ def _collection_error_or_no_palace():
     result = dict(_collection_open_error)
     try:
         result["backend"] = _selected_backend_name()
-    except Exception:
-        pass
+    except Exception:  # noqa: BLE001 - backend name omitted from error payload
+        # Resolving the backend name for the error payload failed: the payload
+        # is returned without the "backend" hint, otherwise unchanged.
+        logger.warning("could not resolve backend name for error payload", exc_info=True)
     return result
 
 
@@ -1287,7 +1306,7 @@ def _selected_backend_name() -> str:
 def _is_chroma_backend() -> bool:
     try:
         return _selected_backend_name() == "chroma"
-    except Exception:
+    except Exception:  # noqa: BLE001 - backend resolution failure returns False, logged at debug
         logger.debug("backend resolution failed", exc_info=True)
         return False
 
@@ -1295,7 +1314,7 @@ def _is_chroma_backend() -> bool:
 def _backend_db_exists() -> bool:
     try:
         return detect_backend_for_path(_config.palace_path) is not None
-    except Exception:
+    except Exception:  # noqa: BLE001 - same pattern, returns False, logged at debug
         logger.debug("backend artifact detection failed", exc_info=True)
         return False
 
@@ -1596,7 +1615,7 @@ def _sqlite_taxonomy():
         from .backends.chroma import _sqlite_wing_room_counts
 
         counts = _sqlite_wing_room_counts(_config.palace_path, _config.collection_name)
-    except Exception:
+    except Exception:  # noqa: BLE001 - fast-path failure, caller falls back to slower path
         logger.debug("sqlite taxonomy fast path failed; falling back", exc_info=True)
         return None
     if counts is None:
@@ -1732,7 +1751,7 @@ def _sqlite_graph_stats():
             "rooms_per_wing": dict(wing_counts.most_common()),
             "top_tunnels": top_tunnels,
         }
-    except Exception:
+    except Exception:  # noqa: BLE001 - same fast-path fallback pattern
         logger.debug("sqlite graph_stats fast path failed; falling back", exc_info=True)
         return None
 
@@ -1819,7 +1838,7 @@ def tool_status():
                 except (TypeError, ValueError):
                     pass
 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - falls back to equivalent client-side recompute
                 logger.warning(
                     "Failed to fetch metadata facets, falling back to client-side loop: %s", e
                 )
@@ -1905,7 +1924,7 @@ def tool_list_wings():
                     wings["unknown"] = wings.get("unknown", 0) + unknown_wings
             except (TypeError, ValueError):
                 pass
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - falls back to equivalent client-side recompute
             if _supports_metadata_facets(col):
                 logger.warning(
                     "Failed to fetch metadata facets, falling back to client-side loop: %s", e
@@ -1960,7 +1979,7 @@ def tool_list_rooms(wing: str = None):
                     rooms["unknown"] = rooms.get("unknown", 0) + unknown_rooms
             except (TypeError, ValueError):
                 pass
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - falls back to equivalent client-side recompute
             if _supports_metadata_facets(col):
                 logger.warning(
                     "Failed to fetch metadata facets, falling back to client-side loop: %s", e
@@ -2012,7 +2031,7 @@ def tool_get_taxonomy():
                         pass
                     temp_taxonomy[wing] = room_counts
                 taxonomy.update(temp_taxonomy)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - falls back to equivalent client-side recompute
             if _supports_metadata_facets(col):
                 logger.warning(
                     "Failed to fetch metadata facets, falling back to client-side loop: %s", e
@@ -2145,15 +2164,13 @@ def tool_check_duplicate(content: str, threshold: float = 0.9):
                     # coerce to empty sentinels so downstream .get() is safe.
                     meta = _safe_meta(results["metadatas"][0][i])
                     doc = results["documents"][0][i] or ""
-                    duplicates.append(
-                        {
-                            "id": drawer_id,
-                            "wing": meta.get("wing", "?"),
-                            "room": meta.get("room", "?"),
-                            "similarity": similarity,
-                            "content": doc[:200] + "..." if len(doc) > 200 else doc,
-                        }
-                    )
+                    duplicates.append({
+                        "id": drawer_id,
+                        "wing": meta.get("wing", "?"),
+                        "room": meta.get("room", "?"),
+                        "similarity": similarity,
+                        "content": doc[:200] + "..." if len(doc) > 200 else doc,
+                    })
         return {
             "is_duplicate": len(duplicates) > 0,
             "matches": duplicates,
@@ -2344,7 +2361,7 @@ def _logical_chunk_group(col, drawer_id: str):
             where={"parent_drawer_id": drawer_id},
             include=["documents", "metadatas"],
         )
-    except Exception:
+    except Exception:  # noqa: BLE001 - lookup failure returns None, caller falls back
         logger.debug("chunk group lookup failed for %s", drawer_id, exc_info=True)
         return None
 
@@ -2452,9 +2469,12 @@ def _collapse_drawer_rows(ids, documents, metadatas):
         parent_id = meta.get("parent_drawer_id")
 
         if parent_id:
-            groups.setdefault(parent_id, []).append(
-                (_chunk_index(meta), drawer_id, doc or "", meta)
-            )
+            groups.setdefault(parent_id, []).append((
+                _chunk_index(meta),
+                drawer_id,
+                doc or "",
+                meta,
+            ))
         else:
             singles.append((drawer_id, doc or "", meta))
 
@@ -2467,15 +2487,13 @@ def _collapse_drawer_rows(ids, documents, metadatas):
             continue
 
         safe_meta = _response_safe_meta(meta)
-        drawers.append(
-            {
-                "drawer_id": drawer_id,
-                "wing": safe_meta.get("wing", ""),
-                "room": safe_meta.get("room", ""),
-                "content_preview": _content_preview(doc),
-                "metadata": safe_meta,
-            }
-        )
+        drawers.append({
+            "drawer_id": drawer_id,
+            "wing": safe_meta.get("wing", ""),
+            "room": safe_meta.get("room", ""),
+            "content_preview": _content_preview(doc),
+            "metadata": safe_meta,
+        })
 
     for parent_id, parts in groups.items():
         parts.sort(key=lambda row: (row[0], row[1]))
@@ -2486,17 +2504,15 @@ def _collapse_drawer_rows(ids, documents, metadatas):
         safe_meta["chunks"] = len(chunk_ids)
         safe_meta["chunk_ids"] = chunk_ids
 
-        drawers.append(
-            {
-                "drawer_id": parent_id,
-                "wing": safe_meta.get("wing", ""),
-                "room": safe_meta.get("room", ""),
-                "content_preview": _content_preview(content),
-                "metadata": safe_meta,
-                "chunks": len(chunk_ids),
-                "chunk_ids": chunk_ids,
-            }
-        )
+        drawers.append({
+            "drawer_id": parent_id,
+            "wing": safe_meta.get("wing", ""),
+            "room": safe_meta.get("room", ""),
+            "content_preview": _content_preview(content),
+            "metadata": safe_meta,
+            "chunks": len(chunk_ids),
+            "chunk_ids": chunk_ids,
+        })
 
     drawers.sort(key=lambda item: item["drawer_id"])
     return drawers
@@ -2606,7 +2622,7 @@ def tool_add_drawer(
         existing = col.get(ids=idempotency_probe_ids, include=[])
         if _get_result_ids(existing):
             return {"success": True, "reason": "already_exists", "drawer_id": drawer_id}
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - idempotency pre-check failure returned as error
         logger.warning("Idempotency pre-check failed for %s", idempotency_probe_ids, exc_info=True)
         return {"success": False, "error": f"Idempotency check failed before write: {e}"}
 
@@ -2645,9 +2661,11 @@ def tool_add_drawer(
             chunk_idx = i // chunk_size
             chunk_ids.append(f"{drawer_id}_chunk_{chunk_idx:06d}")
             chunk_docs.append(content[i : i + chunk_size])
-            chunk_metas.append(
-                {**base_meta, "chunk_index": chunk_idx, "parent_drawer_id": drawer_id}
-            )
+            chunk_metas.append({
+                **base_meta,
+                "chunk_index": chunk_idx,
+                "parent_drawer_id": drawer_id,
+            })
         assert_no_collisions(list(zip(chunk_ids, chunk_metas)), col)
         col.upsert(ids=chunk_ids, documents=chunk_docs, metadatas=chunk_metas)
         # Probe the LAST chunk id, not the first — its presence confirms
@@ -2668,7 +2686,7 @@ def tool_add_drawer(
             "chunks": len(chunk_ids),
             "chunk_ids": chunk_ids,
         }
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - write-path failure returned to caller
         return {"success": False, "error": str(e)}
 
 
@@ -2706,7 +2724,7 @@ def tool_delete_drawer(drawer_id: str):
             "deleted_ids": record["ids"],
             "chunks_deleted": len(record["ids"]),
         }
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - delete-path failure returned to caller
         return {"success": False, "error": str(e)}
 
 
@@ -2936,7 +2954,7 @@ def _purge_source_closets(source_file: str, *, commit: bool) -> int:
 
     try:
         closets_col = get_closets_collection(_config.palace_path, create=False)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - best-effort, never aborts a drawer delete
         logger.warning("Closet purge skipped (collection unavailable): %s", exc)
         return 0
     if closets_col is None:
@@ -2947,7 +2965,7 @@ def _purge_source_closets(source_file: str, *, commit: bool) -> int:
         if commit and count:
             closets_col.delete(where={"source_file": source_file})
         return count
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - best-effort, never aborts a drawer delete
         logger.warning("Closet purge failed for %s: %s", source_file, exc)
         return 0
 
@@ -2991,7 +3009,7 @@ def tool_delete_by_source(source_file: str, dry_run: bool = True):
     try:
         # Paginated to survive palaces larger than the 10k get() truncation.
         metas = _fetch_all_metadata(col, where=where)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - metadata fetch failure returned to caller
         return {"success": False, "error": str(e)}
 
     match_count = len(metas)
@@ -3065,7 +3083,7 @@ def tool_delete_by_source(source_file: str, dry_run: bool = True):
             "deleted": match_count,
             "closets_deleted": closets_deleted,
         }
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - col.delete() failure returned to caller
         return {"success": False, "error": str(e)}
 
 
@@ -3100,7 +3118,7 @@ def tool_sync(project_dir: str = None, wing: str = None, apply: bool = False):
             }
         except ValueError as exc:
             return {"success": False, "error": str(exc)}
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - generic catch after typed handlers, converted to error
             return {"success": False, "error": f"sync failed: {exc}"}
     finally:
         if apply:
@@ -3118,7 +3136,7 @@ def tool_get_drawer(drawer_id: str):
         if record is None:
             return {"error": f"Drawer not found: {drawer_id}"}
         return _drawer_payload(record)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - failure converted to error payload
         return {"error": str(e)}
 
 
@@ -3299,7 +3317,7 @@ def tool_update_drawer(drawer_id: str, content: str = None, wing: str = None, ro
             "wing": new_meta.get("wing", ""),
             "room": new_meta.get("room", ""),
         }
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - mutation failure returned to caller
         return {"success": False, "error": str(e)}
 
 
@@ -3588,13 +3606,11 @@ def tool_diary_write(agent_name: str, entry: str, topic: str = "general", wing: 
             chunk_idx = i // chunk_size
             chunk_ids.append(f"{entry_id}_chunk_{chunk_idx:06d}")
             chunk_docs.append(entry[i : i + chunk_size])
-            chunk_metas.append(
-                {
-                    **base_metadata,
-                    "chunk_index": chunk_idx,
-                    "parent_entry_id": entry_id,
-                }
-            )
+            chunk_metas.append({
+                **base_metadata,
+                "chunk_index": chunk_idx,
+                "parent_entry_id": entry_id,
+            })
         col.add(ids=chunk_ids, documents=chunk_docs, metadatas=chunk_metas)
         logger.info(f"Diary entry: {entry_id} → {wing}/diary/{topic} ({len(chunk_ids)} chunks)")
         return {
@@ -3606,7 +3622,7 @@ def tool_diary_write(agent_name: str, entry: str, topic: str = "general", wing: 
             "chunks": len(chunk_ids),
             "chunk_ids": chunk_ids,
         }
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - chunked-entry write failure returned to caller
         return {"success": False, "error": str(e)}
 
 
@@ -3658,14 +3674,12 @@ def tool_diary_read(agent_name: str, last_n: int = 10, wing: str = ""):
         entries = []
         for doc, meta in zip(results["documents"], results["metadatas"]):
             meta = _safe_meta(meta)
-            entries.append(
-                {
-                    "date": meta.get("date", ""),
-                    "timestamp": meta.get("filed_at", ""),
-                    "topic": meta.get("topic", ""),
-                    "content": doc,
-                }
-            )
+            entries.append({
+                "date": meta.get("date", ""),
+                "timestamp": meta.get("filed_at", ""),
+                "topic": meta.get("topic", ""),
+                "content": doc,
+            })
 
         entries.sort(key=lambda x: x["timestamp"], reverse=True)
         entries = entries[:last_n]
@@ -3696,7 +3710,7 @@ def tool_hook_settings(silent_save: bool = None, desktop_toast: bool = None):
 
     try:
         config = MempalaceConfig()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - config construction failure returned to caller
         return {"success": False, "error": str(e)}
 
     changed = []
@@ -3710,7 +3724,7 @@ def tool_hook_settings(silent_save: bool = None, desktop_toast: bool = None):
     # Re-read to return current state
     try:
         config = MempalaceConfig()
-    except Exception:
+    except Exception:  # noqa: BLE001 - cosmetic re-read for return payload only
         logger.debug("Could not re-read config after update", exc_info=True)
 
     result = {
@@ -3787,7 +3801,7 @@ def tool_reconnect():
         backend.close_palace(palace_ref)
         if getattr(backend, "name", None):
             closed_backend_names.add(backend.name)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - best-effort reconnect cleanup, logged and reported
         logger.debug("Failed to close shared palace backend during reconnect", exc_info=True)
         close_errors.append(f"backend close_palace failed: {exc}")
     if cached_backend_name and cached_backend_name not in closed_backend_names:
@@ -3796,7 +3810,7 @@ def tool_reconnect():
 
             get_backend(cached_backend_name).close_palace(palace_ref)
             closed_backend_names.add(cached_backend_name)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - best-effort reconnect cleanup, logged and reported
             logger.debug(
                 "Failed to close previously cached %s backend during reconnect",
                 cached_backend_name,
@@ -3808,7 +3822,7 @@ def tool_reconnect():
             close = getattr(_client_cache, "close", None)
             if callable(close):
                 close()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - best-effort reconnect cleanup, logged and reported
             logger.debug("Failed to close MCP-local Chroma client during reconnect", exc_info=True)
             close_errors.append(f"local Chroma client close failed: {exc}")
     if _is_chroma_backend():
@@ -3822,7 +3836,7 @@ def tool_reconnect():
                 logger.debug(
                     "SharedSystemClient.clear_system_cache is unavailable; skipping shared Chroma cache clear during reconnect"
                 )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - best-effort reconnect cleanup, logged and reported
             logger.debug(
                 "Failed to clear Chroma shared system cache during reconnect",
                 exc_info=True,
@@ -3850,8 +3864,14 @@ def tool_reconnect():
         for kg in _kg_by_path.values():
             try:
                 kg.close()
-            except Exception:
-                pass
+            except Exception:  # noqa: BLE001 - close is best-effort, but a leaked handle must not be silent
+                # A failed close leaks a KnowledgeGraph sqlite handle. On
+                # Windows a leaked handle blocks the file replace/repair that
+                # this drain exists to enable — the exact lock-hang class this
+                # branch targets. Surface it instead of leaking silently.
+                logger.warning(
+                    "KnowledgeGraph handle close failed; sqlite handle may leak", exc_info=True
+                )
         _kg_by_path.clear()
     _refresh_sqlite_integrity_status()
     if _sqlite_integrity_errors:
@@ -3904,7 +3924,7 @@ def tool_reconnect():
             "vector_disabled": _vector_disabled,
             "vector_disabled_reason": _vector_disabled_reason,
         }
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - final reconnect failure converted to error payload
         return {"success": False, "error": str(e)}
 
 
@@ -3962,9 +3982,10 @@ def tool_checkpoint(items, diary=None, dedup_threshold=0.9, added_by=None):
         # Non-empty strings only: a non-string here would raise deep in
         # sanitize_content / strip_lone_surrogates.
         if not all(isinstance(v, str) and v for v in (wing, room, content)):
-            out["errors"].append(
-                {"item": item, "error": "wing, room, content must be non-empty strings"}
-            )
+            out["errors"].append({
+                "item": item,
+                "error": "wing, room, content must be non-empty strings",
+            })
             continue
         dup = tool_check_duplicate(content, threshold=dedup_threshold)
         if dup.get("is_duplicate"):
@@ -3985,9 +4006,10 @@ def tool_checkpoint(items, diary=None, dedup_threshold=0.9, added_by=None):
         else:
             entry = diary.get("entry") or diary.get("content")
             if not isinstance(entry, str) or not entry:
-                out["errors"].append(
-                    {"diary": diary, "error": "diary entry must be a non-empty string"}
-                )
+                out["errors"].append({
+                    "diary": diary,
+                    "error": "diary entry must be a non-empty string",
+                })
             else:
                 out["diary"] = tool_diary_write(
                     agent_name=diary.get("agent_name", "cursor-ide"),
@@ -4893,7 +4915,7 @@ def handle_request(request):
                         },
                     }
             return _internal_tool_error(req_id, tool_name, e)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - routed through structured JSON-RPC error handler
             return _internal_tool_error(req_id, tool_name, exc)
 
     # Notifications (missing id) must never get a response
@@ -4941,7 +4963,7 @@ def _describe_device_safe() -> str:
         from .embedding import describe_device
 
         return describe_device()
-    except Exception:  # fail-soft: see docstring — log-message helper must not crash
+    except Exception:  # noqa: BLE001 - fail-soft helper used only in warmup log messages
         return "unknown"
 
 
@@ -5018,7 +5040,7 @@ def _maybe_eager_warmup_embedder() -> None:
     palace_path = _config.palace_path
     try:
         backend_name = _selected_backend_name()
-    except Exception as exc:  # fail-soft per docstring
+    except Exception as exc:  # noqa: BLE001 - fail-soft, opt-in warmup feature only
         logger.warning(
             "MEMPALACE_EAGER_WARMUP=%s: backend resolution failed for %s (%s)",
             raw,
@@ -5198,7 +5220,7 @@ def _http_origin_allowed(origin: str) -> bool:
 
     try:
         host = (urlparse(origin).hostname or "").strip().lower()
-    except Exception:
+    except Exception:  # noqa: BLE001 - malformed Origin treated as untrusted, fail-closed
         return False
     return host in ("127.0.0.1", "localhost", "::1")
 
@@ -5345,7 +5367,7 @@ def _build_http_server(host: str, port: int):
             try:
                 raw = self.rfile.read(content_length)
                 request = json.loads(raw.decode("utf-8"))
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - malformed body converted to -32700 parse error
                 logger.warning("HTTP JSON-RPC read or parse error: %s", exc)
                 self._send_json(400, _json_rpc_parse_error())
                 return
@@ -5499,7 +5521,7 @@ def _run_stdio_loop() -> None:
                 sys.stdout.flush()
         except KeyboardInterrupt:
             break
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - one bad request line must not kill the process
             logger.error(f"Server error: {e}")
 
 

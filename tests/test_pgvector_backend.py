@@ -103,9 +103,12 @@ class _FakePgVectorClient:
         limit=None,
         offset=None,
     ):
-        self.scroll_calls.append(
-            {"where": where, "limit": limit, "offset": offset, "with_document": with_document}
-        )
+        self.scroll_calls.append({
+            "where": where,
+            "limit": limit,
+            "offset": offset,
+            "with_document": with_document,
+        })
         rows = self._filtered(table, where)
         if limit is not None or offset:
             # Mirror the real backend: ORDER BY id, then LIMIT/OFFSET.
@@ -116,17 +119,15 @@ class _FakePgVectorClient:
                 rows = rows[:limit]
         out = []
         for row in rows:
-            out.append(
-                {
-                    "id": row["id"],
-                    # Match the real backend: NULL document becomes empty string
-                    # via the SELECT NULL::text projection when with_document=False.
-                    "document": row["document"] if with_document else "",
-                    "metadata": row.get("metadata") or {},
-                    "embedding": row.get("embedding") if with_embedding else None,
-                    "distance": None,
-                }
-            )
+            out.append({
+                "id": row["id"],
+                # Match the real backend: NULL document becomes empty string
+                # via the SELECT NULL::text projection when with_document=False.
+                "document": row["document"] if with_document else "",
+                "metadata": row.get("metadata") or {},
+                "embedding": row.get("embedding") if with_embedding else None,
+                "distance": None,
+            })
         return out
 
     def delete_rows(self, table, *, ids=None, where=None):
@@ -710,7 +711,7 @@ def test_pgvector_live_roundtrip_when_enabled(tmp_path):
     finally:
         try:
             backend.delete_collection(str(tmp_path), "drawers")
-        except Exception:
+        except Exception:  # noqa: BLE001 - best-effort collection delete in teardown
             pass
         backend.close()
 
@@ -781,7 +782,7 @@ def test_client_concurrent_first_connect_single_connection(monkeypatch):
     def run_query():
         try:
             client.ping()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - capture thread error for main-thread assert
             errors.append(exc)
 
     threads = [threading.Thread(target=run_query, daemon=True) for _ in range(2)]

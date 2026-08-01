@@ -189,12 +189,10 @@ def test_unicode_names_written_literally_not_escaped(temp_registry):
 def test_populated_registry_improves_miner_recall(temp_registry):
     """The whole point of the wire-up: names written via add_to_known_entities
     must be recognized by the miner's entity-extraction metadata pass."""
-    miner.add_to_known_entities(
-        {
-            "people": ["Julia Grib", "Kevin Heifner"],
-            "projects": ["hyperion-history", "mempalace"],
-        }
-    )
+    miner.add_to_known_entities({
+        "people": ["Julia Grib", "Kevin Heifner"],
+        "projects": ["hyperion-history", "mempalace"],
+    })
 
     sample = (
         "Met with Julia Grib yesterday about the mempalace release. "

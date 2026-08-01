@@ -162,7 +162,7 @@ def get_palace_cursor(collection, session_id: str) -> Optional[str]:
             where={"session_id": session_id},
             include=["metadatas"],
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - degraded cursor, re-ingestion via idempotent ids
         logger.warning(
             "sweeper: cursor lookup failed for session_id=%s (%s); "
             "treating as empty — drawers will be re-upserted idempotently.",
@@ -238,7 +238,7 @@ def sweep(jsonl_path: str, palace_path: str, source_label: Optional[str] = None)
             # Chroma returns a dict; typed backends return GetResult — the
             # compat shim makes ``.get("ids")`` work on both.
             present = set(existing.get("ids") or [])
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - only affects added-vs-present metric accuracy
             logger.warning(
                 "sweeper: existence pre-check failed (%s); "
                 "counting all batch rows as new (metric may over-count on reruns).",
@@ -319,7 +319,7 @@ def sweep_directory(dir_path: str, palace_path: str) -> dict:
     for f in files:
         try:
             result = sweep(str(f), palace_path, source_label=str(f))
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - per-file failure logged and recorded in failures list
             logger.error("sweeper: sweep failed on %s: %s", f, exc)
             print(f"  WARNING: sweep failed on {f}: {exc}", file=sys.stderr)
             failures.append({"file": str(f), "error": str(exc)})
@@ -327,14 +327,12 @@ def sweep_directory(dir_path: str, palace_path: str) -> dict:
         total_added += result["drawers_added"]
         total_already_present += result.get("drawers_already_present", 0)
         total_skipped += result["drawers_skipped"]
-        per_file.append(
-            {
-                "file": str(f),
-                "added": result["drawers_added"],
-                "already_present": result.get("drawers_already_present", 0),
-                "skipped": result["drawers_skipped"],
-            }
-        )
+        per_file.append({
+            "file": str(f),
+            "added": result["drawers_added"],
+            "already_present": result.get("drawers_already_present", 0),
+            "skipped": result["drawers_skipped"],
+        })
 
     return {
         "files_attempted": len(files),

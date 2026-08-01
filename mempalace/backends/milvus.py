@@ -270,7 +270,7 @@ class _MilvusConfig:
             from ..config import MempalaceConfig
 
             cfg = MempalaceConfig()
-        except Exception:  # pragma: no cover - config import should be boring
+        except Exception:  # noqa: BLE001 - pragma: no cover - config import guarded, falls back to cfg=None
             cfg = None
         uri = (
             options.get("uri")
@@ -367,7 +367,7 @@ class MilvusCollection(BaseCollection):
             return None
         try:
             info = self._client.describe_collection(self._remote_collection)
-        except Exception:
+        except Exception:  # noqa: BLE001 - returns None, a legitimate "unknown" sentinel
             logger.debug("Milvus describe_collection failed", exc_info=True)
             return None
         fields = []
@@ -425,7 +425,7 @@ class MilvusCollection(BaseCollection):
             return False
         try:
             info = self._client.describe_collection(self._remote_collection)
-        except Exception:
+        except Exception:  # noqa: BLE001 - False fallback is conservative default
             logger.debug("Milvus describe_collection failed", exc_info=True)
             self._known_native_lexical = False
             return False
@@ -733,8 +733,10 @@ class MilvusCollection(BaseCollection):
         finally:
             try:
                 iterator.close()
-            except Exception:
-                pass
+            except Exception:  # noqa: BLE001 - iterator close best effort, cursor may leak
+                # iterator.close() in the finally failed: the server-side query
+                # cursor may leak until it times out; the rows are already read.
+                logger.debug("milvus query_iterator close failed (cursor leak)", exc_info=True)
         return rows
 
     def get(
@@ -826,7 +828,7 @@ class MilvusCollection(BaseCollection):
             if rows:
                 first = rows[0]
                 return int(first.get("count(*)", first.get("count", 0)))
-        except Exception:
+        except Exception:  # noqa: BLE001 - first count strategy failed, falls back to stats
             logger.debug("Milvus count(*) query failed; falling back to stats", exc_info=True)
         try:
             stats = self._client.get_collection_stats(self._remote_collection)
@@ -894,25 +896,23 @@ class MilvusCollection(BaseCollection):
         try:
             if not self._remote_exists():
                 return HealthStatus.unhealthy("milvus collection not found")
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - converted to HealthStatus.unhealthy(str(exc))
             return HealthStatus.unhealthy(str(exc))
         return HealthStatus.healthy()
 
 
 class MilvusBackend(BaseBackend):
     name = "milvus"
-    capabilities = frozenset(
-        {
-            "requires_explicit_embeddings",
-            "supports_embeddings_in",
-            "supports_embeddings_passthrough",
-            "supports_embeddings_out",
-            "supports_metadata_filters",
-            "supports_lexical_search",
-            "supports_namespace_isolation",
-            "server_mode",
-        }
-    )
+    capabilities = frozenset({
+        "requires_explicit_embeddings",
+        "supports_embeddings_in",
+        "supports_embeddings_passthrough",
+        "supports_embeddings_out",
+        "supports_metadata_filters",
+        "supports_lexical_search",
+        "supports_namespace_isolation",
+        "server_mode",
+    })
 
     def __init__(self):
         self._clients: dict[_MilvusConfig, Any] = {}
@@ -1244,7 +1244,7 @@ class MilvusBackend(BaseBackend):
     def _load_remote_collection(self, client, collection_name: str) -> None:
         try:
             client.load_collection(collection_name)
-        except Exception:
+        except Exception:  # noqa: BLE001 - non-fatal, Milvus lazily loads on first query
             logger.debug("Milvus load_collection skipped", exc_info=True)
 
     def close_palace(self, palace: PalaceRef | str) -> None:
@@ -1270,7 +1270,7 @@ class MilvusBackend(BaseBackend):
         for client in clients:
             try:
                 client.close()
-            except Exception:
+            except Exception:  # noqa: BLE001 - closing already-doomed clients during teardown
                 logger.debug("Milvus client close failed", exc_info=True)
 
     def health(self, palace: Optional[PalaceRef] = None) -> HealthStatus:
@@ -1287,7 +1287,7 @@ class MilvusBackend(BaseBackend):
                 config = self._effective_config(palace, None)
             client = self._client(config)
             client.list_collections()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - same health-check pattern as collection health()
             return HealthStatus.unhealthy(str(exc))
         return HealthStatus.healthy()
 

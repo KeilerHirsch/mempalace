@@ -444,18 +444,16 @@ def test_classify_entity_mixed_signals():
 
 def test_detect_entities_with_person_file(tmp_path):
     f = tmp_path / "notes.txt"
-    content = "\n".join(
-        [
-            "Riley said hello today.",
-            "Riley asked about the project.",
-            "Riley told me she was happy.",
-            "Riley: I think we should go.",
-            "Hey Riley, thanks for the help.",
-            "Riley laughed and smiled.",
-            "Riley decided to join.",
-            "Riley pushed the change.",
-        ]
-    )
+    content = "\n".join([
+        "Riley said hello today.",
+        "Riley asked about the project.",
+        "Riley told me she was happy.",
+        "Riley: I think we should go.",
+        "Hey Riley, thanks for the help.",
+        "Riley laughed and smiled.",
+        "Riley decided to join.",
+        "Riley pushed the change.",
+    ])
     f.write_text(content)
     result = detect_entities([f])
     all_names = [e["name"] for cat in result.values() for e in cat]
@@ -467,16 +465,14 @@ def test_detect_entities_with_project_file(tmp_path):
     # "ChromaDB" has uppercase+lowercase mix but extract_candidates looks
     # for /[A-Z][a-z]{1,19}/ — so we need a name that matches that regex.
     # Use "Lantern" which matches the capitalized-word pattern.
-    content = "\n".join(
-        [
-            "The Lantern project is great.",
-            "Building Lantern was fun.",
-            "We deployed Lantern today.",
-            "Install Lantern with pip install Lantern.",
-            "Check Lantern.py for the source.",
-            "Lantern v2 is faster.",
-        ]
-    )
+    content = "\n".join([
+        "The Lantern project is great.",
+        "Building Lantern was fun.",
+        "We deployed Lantern today.",
+        "Install Lantern with pip install Lantern.",
+        "Check Lantern.py for the source.",
+        "Lantern v2 is faster.",
+    ])
     f.write_text(content)
     result = detect_entities([f])
     all_names = [e["name"] for cat in result.values() for e in cat]

@@ -141,18 +141,16 @@ class TestMultiPalaceIsolation:
         )
 
         monkeypatch.setenv("MEMPALACE_PALACE_PATH", str(palace_a))
-        hallways_mod._save_hallways(
-            [
-                {
-                    "id": "h_from_a",
-                    "wing": "wing_a",
-                    "entity_a": "Alice",
-                    "entity_b": "Bob",
-                    "co_occurrence_count": 2,
-                    "rooms": ["room_a"],
-                }
-            ]
-        )
+        hallways_mod._save_hallways([
+            {
+                "id": "h_from_a",
+                "wing": "wing_a",
+                "entity_a": "Alice",
+                "entity_b": "Bob",
+                "co_occurrence_count": 2,
+                "rooms": ["room_a"],
+            }
+        ])
         assert os.path.exists(str(tmp_path / "a" / "hallways.json"))
 
         monkeypatch.setenv("MEMPALACE_PALACE_PATH", str(palace_b))

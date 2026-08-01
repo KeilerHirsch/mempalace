@@ -295,7 +295,7 @@ def sync_palace(
         closets_col = None
         try:
             closets_col = get_closets_collection(palace_path, create=False)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - optional secondary cleanup step
             logger.warning("Closet purge skipped (collection unavailable): %s", exc)
 
         closets_removed = 0

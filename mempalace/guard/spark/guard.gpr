@@ -1,0 +1,30 @@
+--  Project file for the MemPalace SPARK consistency guard PoC.
+--  Two uses: (1) gnatprove proves the pure SPARK core to Gold;
+--  (2) gprbuild compiles it plus the C-ABI wrapper into a shared
+--  library that Python loads via ctypes.
+
+library project Guard is
+
+   for Source_Dirs use ("src");
+   for Object_Dir use "obj";
+   for Library_Name use "guard";
+   for Library_Dir use "lib";
+   for Library_Kind use "dynamic";
+
+   --  The exported SPARK/Ada packages form the library interface. This
+   --  makes gprbuild emit an elaboration wrapper; combined with
+   --  Library_Auto_Init the GNAT runtime elaborates on DLL load, so
+   --  ctypes can call the exports directly without a manual init call.
+   for Library_Interface use ("Consistency", "Consistency_C");
+   for Library_Auto_Init use "true";
+
+   package Compiler is
+      for Default_Switches ("Ada") use ("-g", "-O2", "-gnata");
+   end Compiler;
+
+   package Prove is
+      --  Prove everything; report only genuine unproved checks.
+      for Proof_Switches ("Ada") use ("--level=2", "--report=fail");
+   end Prove;
+
+end Guard;

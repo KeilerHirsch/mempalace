@@ -30,6 +30,7 @@ Usage (from CLI):
 """
 
 import argparse
+import logging
 import os
 import shutil
 import sqlite3
@@ -143,7 +144,7 @@ def _drawers_collection_name() -> str:
         from .config import MempalaceConfig
 
         return MempalaceConfig().collection_name or COLLECTION_NAME
-    except Exception:
+    except Exception:  # noqa: BLE001 - config read failure falls back to module default constant
         return COLLECTION_NAME
 
 
@@ -170,20 +171,34 @@ def _get_palace_path():
         from .config import MempalaceConfig
 
         return MempalaceConfig().palace_path
-    except Exception:
+    except Exception:  # noqa: BLE001 - config read failure logged before falling back to default path
         default = os.path.join(os.path.expanduser("~"), ".mempalace", "palace")
+        logging.getLogger("mempalace_mcp").warning(
+            "config read failed while resolving palace path for repair; "
+            "falling back to default %s — this may target the wrong palace",
+            default,
+            exc_info=True,
+        )
         return default
 
 
 def _paginate_ids(col, where=None):
-    """Pull all IDs in a collection using pagination."""
+    """Pull all IDs in a collection using pagination.
+
+    Raises :class:`ScanAborted` if both the paginated and the non-paginated
+    fallback fetch fail. A truncated ID list would silently exclude drawers
+    from the corruption scan and its caller (``scan_palace``) has no way to
+    tell "the palace really has this many IDs" from "listing failed partway
+    through" — fail closed instead, matching the sibling probe loop a few
+    lines down in this module.
+    """
     ids = []
     page = 1000
     offset = 0
     while True:
         try:
             r = col.get(where=where, include=[], limit=page, offset=offset)
-        except Exception:
+        except Exception:  # noqa: BLE001 - triggers legitimate fallback query strategy
             try:
                 r = col.get(where=where, include=[], limit=page)
                 new_ids = [i for i in r["ids"] if i not in set(ids)]
@@ -192,8 +207,10 @@ def _paginate_ids(col, where=None):
                 ids.extend(new_ids)
                 offset += len(new_ids)
                 continue
-            except Exception:
-                break
+            except Exception as exc:
+                raise ScanAborted(
+                    f"ID listing failed after {len(ids)} IDs fetched: {type(exc).__name__}: {exc}"
+                ) from exc
         n = len(r["ids"]) if r["ids"] else 0
         if n == 0:
             break
@@ -307,24 +324,59 @@ def _rebuild_collection_via_temp(
 
         try:
             _delete_collection_if_exists(backend, palace_path, temp_name)
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001 - temp-collection cleanup leaked
+            # Temp collection cleanup after a successful rebuild failed: leaks
+            # the temp collection but the live rebuild is intact.
+            progress(f"  Warning: temp collection cleanup failed (leak): {exc}")
         return rebuilt
     except Exception as exc:
         try:
             _delete_collection_if_exists(backend, palace_path, temp_name)
-        except Exception:
-            pass
+        except Exception as cleanup_exc:  # noqa: BLE001 - temp cleanup leaked on failure path
+            # Temp collection cleanup on the failure path failed: leaks the temp
+            # collection; re-raise the original rebuild error below regardless.
+            progress(f"  Warning: temp collection cleanup failed (leak): {cleanup_exc}")
         raise RebuildCollectionError(str(exc), live_replaced=live_replaced) from exc
+
+
+class ScanAborted(RuntimeError):
+    """Raised when the corruption scan cannot trust its own result.
+
+    A ``col.get`` that RAISES signals a backend/transient failure (chromadb
+    surfaces missing rows as an empty result, never an exception — measured
+    against chromadb 1.5.9). Continuing past a raised fetch would classify
+    IDs as corrupt on the strength of a lock contention or backend hiccup,
+    and the prune step would then DELETE good drawers. Fail closed instead:
+    abort the scan, write nothing, and tell the operator to re-run.
+    """
+
+
+class PoisonDetectionAborted(RuntimeError):
+    """Raised when the poisoned-max_seq_id probe cannot trust its own result.
+
+    A probe that RAISES tells us nothing about whether the palace is
+    poisoned — it is not the same as a clean "not poisoned" result. Treating
+    a crashed probe as "not poisoned" would let ``rebuild_index`` fall
+    through into the legacy rebuild path, which can discard queued writes
+    (see the module docstring above). Fail closed instead: abort the
+    preflight and tell the operator to re-run rather than silently risking
+    the destructive path.
+    """
 
 
 def scan_palace(palace_path=None, only_wing=None, collection_name: Optional[str] = None):
     """Scan the palace for corrupt/unfetchable IDs.
 
-    Probes in batches of 100, falls back to per-ID on failure.
-    Writes corrupt_ids.txt to the palace directory for the prune step.
+    Probes in batches of 100. A missing ID (empty ``get`` result) is a real
+    corruption signal and goes to ``bad_set``. A RAISED fetch is a backend/
+    transient fault and aborts the scan with :class:`ScanAborted` — it never
+    marks IDs bad, because the prune step deletes them and a transient error
+    must not cause data loss.
 
-    Returns (good_set, bad_set).
+    Writes corrupt_ids.txt to the palace directory for the prune step only
+    on a clean completion.
+
+    Returns (good_set, bad_set). Raises :class:`ScanAborted` on fetch error.
     """
     palace_path = palace_path or _get_palace_path()
     collection_name = collection_name or _drawers_collection_name()
@@ -358,21 +410,26 @@ def scan_palace(palace_path=None, only_wing=None, collection_name: Optional[str]
         chunk = all_ids[i : i + batch]
         try:
             r = col.get(ids=chunk, include=["documents"])
-            for got in r["ids"]:
-                good_set.add(got)
-            for mid in chunk:
-                if mid not in good_set:
-                    bad_set.add(mid)
-        except Exception:
-            for sid in chunk:
-                try:
-                    r = col.get(ids=[sid], include=["documents"])
-                    if r["ids"]:
-                        good_set.add(sid)
-                    else:
-                        bad_set.add(sid)
-                except Exception:
-                    bad_set.add(sid)
+        except Exception as exc:  # noqa: BLE001 - any raised fetch is transient/backend, not corruption
+            # chromadb returns an EMPTY result for a missing/corrupt id; it
+            # only RAISES on a backend/transient failure (lock contention,
+            # internal error). Marking these ids bad would let the prune step
+            # delete good drawers on a transient fault. Fail closed: abort,
+            # write nothing, tell the operator to re-run once the palace is
+            # quiescent.
+            logging.getLogger("mempalace_mcp").warning(
+                "scan aborted: fetch failed for a batch of %d ids", len(chunk), exc_info=True
+            )
+            raise ScanAborted(
+                f"fetch failed during scan ({exc!r}); palace may be under "
+                "concurrent write or a backend error. Re-run the scan when "
+                "no other writer is active. No IDs were marked corrupt."
+            ) from exc
+        for got in r["ids"]:
+            good_set.add(got)
+        for mid in chunk:
+            if mid not in good_set:
+                bad_set.add(mid)
 
         if (i // batch) % 50 == 0:
             elapsed = time.time() - t0
@@ -407,7 +464,7 @@ def prune_corrupt(palace_path=None, confirm=False, collection_name: Optional[str
         print("  No corrupt_ids.txt found — run scan first.")
         return
 
-    with open(bad_file) as f:
+    with open(bad_file, encoding="utf-8") as f:
         bad_ids = [line.strip() for line in f if line.strip()]
     print(f"  {len(bad_ids):,} corrupt IDs queued for deletion")
 
@@ -428,12 +485,12 @@ def prune_corrupt(palace_path=None, confirm=False, collection_name: Optional[str
         try:
             col.delete(ids=chunk)
             deleted += len(chunk)
-        except Exception:
+        except Exception:  # noqa: BLE001 - batch delete failure falls back to per-id delete
             for sid in chunk:
                 try:
                     col.delete(ids=[sid])
                     deleted += 1
-                except Exception:
+                except Exception:  # noqa: BLE001 - per-id delete failure counted, surfaced in report
                     failed += 1
         if (i // batch) % 20 == 0:
             print(f"    deleted {deleted}/{len(bad_ids)}  (failed: {failed})")
@@ -566,7 +623,7 @@ def sqlite_drawer_count(palace_path: str, collection_name: Optional[str] = None)
             return int(row[0]) if row and row[0] is not None else None
         finally:
             conn.close()
-    except Exception:
+    except Exception:  # noqa: BLE001 - documented deliberate fallback, silent is correct here
         # chromadb schema differs by version (segments / collections column
         # names occasionally rename). Silent fallback is correct here —
         # the cap-detection check still catches the user-reported case.
@@ -725,7 +782,14 @@ def maybe_autoheal_fts5_index(palace_path: str, errors: list[str], *, progress=p
             "Stop it and re-run."
         )
         return errors
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - FTS5 rebuild failed, palace left untouched
+        # In-place FTS5 inverted-index rebuild failed: the palace is left
+        # untouched and the caller keeps the pre-existing integrity errors.
+        import logging
+
+        logging.getLogger("mempalace_mcp").warning(
+            "FTS5 rebuild failed (palace left untouched)", exc_info=True
+        )
         progress(f"  FTS5 rebuild failed (leaving palace untouched): {exc}")
         return errors
 
@@ -796,8 +860,10 @@ def maybe_repair_poisoned_max_seq_id_before_rebuild(
 
     try:
         poisoned = _detect_poisoned_max_seq_ids(db_path)
-    except Exception:
-        return None
+    except Exception as exc:
+        raise PoisonDetectionAborted(
+            f"poisoned max_seq_id probe failed: {type(exc).__name__}: {exc}"
+        ) from exc
 
     if not poisoned:
         return None
@@ -936,7 +1002,7 @@ def _vacuum_and_rebuild_fts5(
                         "post-recovery quick_check failed: " + "; ".join(errors[:3])
                     )
                 progress("  SQLite quick_check clean.")
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - non-strict path is best-effort cleanup; strict re-raises below
         if strict:
             # Preserve the concrete SQLite/filesystem exception for callers
             # that need to classify the failure. The strict recovery caller
@@ -1011,10 +1077,20 @@ def rebuild_index(
         print_sqlite_integrity_abort(palace_path, sqlite_errors)
         return
 
-    preflight = maybe_repair_poisoned_max_seq_id_before_rebuild(
-        palace_path,
-        assume_yes=True,
-    )
+    try:
+        preflight = maybe_repair_poisoned_max_seq_id_before_rebuild(
+            palace_path,
+            assume_yes=True,
+        )
+    except PoisonDetectionAborted as exc:
+        progress(f"  Error: {exc}")
+        progress(
+            "  Could not determine whether the palace has a poisoned "
+            "max_seq_id bookmark. Continuing into the rebuild would risk "
+            "discarding queued writes if it is poisoned. Re-run once the "
+            "underlying issue is resolved."
+        )
+        return
     if preflight is not None:
         return
 
@@ -1022,7 +1098,7 @@ def rebuild_index(
     try:
         col = backend.get_collection(palace_path, collection_name)
         total = col.count()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - reported to user with recovery guidance, aborts cleanly
         progress(f"  Error reading palace: {e}")
         progress(index_read_recovery_guidance())
         return
@@ -1085,7 +1161,17 @@ def rebuild_index(
                 _delete_collection_if_exists(backend, palace_path, collection_name)
                 _copy_file_no_follow(backup_path, sqlite_path, replace=True)
                 progress("  Backup restored. Palace is back to pre-repair state.")
-            except Exception as restore_error:
+            except Exception as restore_error:  # noqa: BLE001 - backup restore failed, manual restore needed
+                # Automatic backup restore failed after an aborted rebuild: the
+                # palace needs a manual restore from the backup path.
+                import logging
+
+                logging.getLogger("mempalace_mcp").error(
+                    "backup restore failed after aborted rebuild; manual restore from %s: %s",
+                    backup_path,
+                    restore_error,
+                    exc_info=True,
+                )
                 progress(f"  Backup restore failed: {restore_error}")
                 progress(f"  Manual restore required from: {backup_path}")
         elif e.live_replaced:
@@ -1675,18 +1761,27 @@ def _close_chroma_handles(palace_path: str, backend: "ChromaBackend | None" = No
     transient backend instance for the max-seq-id repair path.
     """
     import gc
+    import logging
 
     try:
         closer = backend if backend is not None else ChromaBackend()
         closer.close_palace(palace_path)
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001 - stale handle blocks Windows repair
+        # close_palace before repair failed: a stale mmap handle can block the
+        # in-place SQLite repair on Windows (file still locked).
+        logging.getLogger("mempalace_mcp").warning(
+            "close_palace before repair failed (stale handle): %s", exc, exc_info=True
+        )
     try:
         from chromadb.api.client import SharedSystemClient
 
         SharedSystemClient.clear_system_cache()
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001 - stale chromadb cache into repair
+        # clear_system_cache failed: a stale chromadb singleton client can carry
+        # cached handles into the repair path.
+        logging.getLogger("mempalace_mcp").warning(
+            "SharedSystemClient.clear_system_cache failed (stale cache): %s", exc, exc_info=True
+        )
     gc.collect()
 
 
@@ -1713,18 +1808,28 @@ def _detect_poisoned_max_seq_ids(
 
     If ``segment`` is given, the detection is restricted to that segment id
     (still only returning it if it actually exceeds the threshold).
+
+    A missing ``max_seq_id`` table is not evidence of anything transient —
+    it is conclusive proof there are no poisoned rows (there is no table
+    to hold them), unlike any other query failure which means "unknown,
+    cannot tell" and must abort the caller instead of proceeding.
     """
     with sqlite3.connect(db_path) as conn:
-        if segment is not None:
-            rows = conn.execute(
-                "SELECT segment_id, seq_id FROM max_seq_id WHERE segment_id = ? AND seq_id > ?",
-                (segment, threshold),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT segment_id, seq_id FROM max_seq_id WHERE seq_id > ?",
-                (threshold,),
-            ).fetchall()
+        try:
+            if segment is not None:
+                rows = conn.execute(
+                    "SELECT segment_id, seq_id FROM max_seq_id WHERE segment_id = ? AND seq_id > ?",
+                    (segment, threshold),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT segment_id, seq_id FROM max_seq_id WHERE seq_id > ?",
+                    (threshold,),
+                ).fetchall()
+        except sqlite3.OperationalError as exc:
+            if "no such table" in str(exc).lower():
+                return []
+            raise
     return [(str(sid), int(val)) for sid, val in rows]
 
 
@@ -1951,7 +2056,11 @@ if __name__ == "__main__":
     if args.command == "status":
         status(palace_path=path)
     elif args.command == "scan":
-        scan_palace(palace_path=path, only_wing=args.wing)
+        try:
+            scan_palace(palace_path=path, only_wing=args.wing)
+        except ScanAborted as exc:
+            print(f"\n  Scan aborted (no IDs marked corrupt): {exc}")
+            raise SystemExit(2) from exc
     elif args.command == "prune":
         prune_corrupt(palace_path=path, confirm=args.confirm)
     elif args.command == "rebuild":

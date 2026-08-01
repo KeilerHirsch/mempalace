@@ -137,7 +137,7 @@ def _resolve_intra_op_threads() -> int:
         from .config import MempalaceConfig
 
         return MempalaceConfig().embedding_threads
-    except Exception:
+    except Exception:  # noqa: BLE001 - falls back to ORT default (uncapped)
         logger.debug("embedding_threads resolution failed; leaving ORT default", exc_info=True)
         return 0
 
@@ -190,7 +190,7 @@ def _build_ef_class():
                     providers=providers,
                     sess_options=so,
                 )
-            except Exception:
+            except Exception:  # noqa: BLE001 - documented fallback to upstream's uncapped build
                 logger.warning(
                     "thread-capped ORT session build failed; using ORT defaults",
                     exc_info=True,
@@ -454,7 +454,7 @@ def probe_dimension(device: Optional[str] = None, model: Optional[str] = None) -
         ef = get_embedding_function(device=device, model=model)
         vectors = ef(input=["probe"])
         dim = len(vectors[0]) if vectors and vectors[0] is not None else 0
-    except Exception:
+    except Exception:  # noqa: BLE001 - probe failure returns 0, documented "dimension unknown"
         logger.debug("Embedding dimension probe failed for model=%s", name, exc_info=True)
         dim = 0
     _DIM_CACHE[name] = dim

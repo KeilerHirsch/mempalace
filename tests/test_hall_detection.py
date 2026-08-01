@@ -107,7 +107,7 @@ class TestConvoMinerWritesHalls:
         convo_dir = os.path.join(tmp_dir, "convos")
         os.makedirs(convo_dir)
         # Create a conversation file with technical content
-        with open(os.path.join(convo_dir, "session.txt"), "w") as f:
+        with open(os.path.join(convo_dir, "session.txt"), "w", encoding="utf-8") as f:
             f.write("> How do I fix the python script bug?\n")
             f.write("You need to check the error handler code and fix the traceback.\n")
             f.write("> What about the database migration?\n")
@@ -159,10 +159,10 @@ class TestMineProjectWritesHalls:
         os.makedirs(project_dir)
         # Create config
         config = {"wing": "test", "rooms": [{"name": "general", "description": "all"}]}
-        with open(os.path.join(project_dir, "mempalace.yaml"), "w") as f:
+        with open(os.path.join(project_dir, "mempalace.yaml"), "w", encoding="utf-8") as f:
             yaml.dump(config, f)
         # Create test file with technical content
-        with open(os.path.join(project_dir, "code.py"), "w") as f:
+        with open(os.path.join(project_dir, "code.py"), "w", encoding="utf-8") as f:
             f.write("def fix_bug():\n    # Fixed python script error in handler\n    pass\n")
 
         mine(project_dir, palace_dir, wing_override="test", agent="test")

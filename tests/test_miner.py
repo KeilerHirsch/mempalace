@@ -60,7 +60,7 @@ def test_project_mining():
             project_root / "backend" / "app.py",
             "def main():\n    print('hello world')\n" * 20,
         )
-        with open(project_root / "mempalace.yaml", "w") as f:
+        with open(project_root / "mempalace.yaml", "w", encoding="utf-8") as f:
             yaml.dump(
                 {
                     "wing": "test_project",
@@ -111,7 +111,7 @@ def test_mine_computes_hallways_for_wing_post_mine(monkeypatch):
             project_root / "backend" / "app.py",
             "def main():\n    print('hello world')\n" * 20,
         )
-        with open(project_root / "mempalace.yaml", "w") as f:
+        with open(project_root / "mempalace.yaml", "w", encoding="utf-8") as f:
             yaml.dump(
                 {
                     "wing": "test_project",
@@ -161,7 +161,7 @@ def test_mine_hallway_failure_does_not_crash_mine(monkeypatch):
             project_root / "backend" / "app.py",
             "def main():\n    print('hello world')\n" * 20,
         )
-        with open(project_root / "mempalace.yaml", "w") as f:
+        with open(project_root / "mempalace.yaml", "w", encoding="utf-8") as f:
             yaml.dump(
                 {
                     "wing": "test_project",
@@ -211,7 +211,7 @@ def test_mine_computes_entity_tunnels_for_wing_post_mine(monkeypatch):
             project_root / "backend" / "app.py",
             "def main():\n    print('hello world')\n" * 20,
         )
-        with open(project_root / "mempalace.yaml", "w") as f:
+        with open(project_root / "mempalace.yaml", "w", encoding="utf-8") as f:
             yaml.dump(
                 {
                     "wing": "test_project",
@@ -256,7 +256,7 @@ def test_mine_entity_tunnel_failure_does_not_crash_mine(monkeypatch):
             project_root / "backend" / "app.py",
             "def main():\n    print('hello world')\n" * 20,
         )
-        with open(project_root / "mempalace.yaml", "w") as f:
+        with open(project_root / "mempalace.yaml", "w", encoding="utf-8") as f:
             yaml.dump(
                 {
                     "wing": "test_project",
@@ -663,7 +663,7 @@ def test_mine_exclude_patterns_applied_to_prescan_files(monkeypatch):
         write_file(project_root / "docs" / "guide.md", "# Guide\n" * 20)
         write_file(project_root / "README.md", "# README\n" * 20)
 
-        with open(project_root / "mempalace.yaml", "w") as f:
+        with open(project_root / "mempalace.yaml", "w", encoding="utf-8") as f:
             yaml.dump(
                 {
                     "wing": "test_project",
@@ -818,7 +818,7 @@ def test_file_already_mined_check_mtime():
         )
 
         test_file = os.path.join(tmpdir, "test.txt")
-        with open(test_file, "w") as f:
+        with open(test_file, "w", encoding="utf-8") as f:
             f.write("hello world")
 
         mtime = os.path.getmtime(test_file)
@@ -846,7 +846,7 @@ def test_file_already_mined_check_mtime():
         assert file_already_mined(col, test_file, check_mtime=True) is True
 
         # Modify file and force a different mtime (Windows has low mtime resolution)
-        with open(test_file, "w") as f:
+        with open(test_file, "w", encoding="utf-8") as f:
             f.write("modified content")
         os.utime(test_file, (mtime + 10, mtime + 10))
 
@@ -930,13 +930,11 @@ def test_file_already_mined_extract_mode_paginates_large_sources():
         }
         for _ in range(1000)
     ]
-    metadatas.append(
-        {
-            "source_file": source_file,
-            "extract_mode": "general",
-            "normalize_version": NORMALIZE_VERSION,
-        }
-    )
+    metadatas.append({
+        "source_file": source_file,
+        "extract_mode": "general",
+        "normalize_version": NORMALIZE_VERSION,
+    })
 
     class FakeCollection:
         def get(self, where=None, limit=1, offset=0, include=None):
@@ -959,7 +957,7 @@ def test_mine_dry_run_with_tiny_file_no_crash():
         write_file(project_root / "good.py", "def main():\n    print('hello world')\n" * 20)
         write_file(project_root / "tiny.txt", "x")
 
-        with open(project_root / "mempalace.yaml", "w") as f:
+        with open(project_root / "mempalace.yaml", "w", encoding="utf-8") as f:
             yaml.dump(
                 {
                     "wing": "test_project",
@@ -1420,7 +1418,7 @@ def test_mine_creates_topic_tunnels_for_shared_topics(tmp_path, monkeypatch):
         project_root / "notes.md",
         "Some prose long enough to make a chunk. " * 20,
     )
-    with open(project_root / "mempalace.yaml", "w") as f:
+    with open(project_root / "mempalace.yaml", "w", encoding="utf-8") as f:
         yaml.dump({"wing": "wing_two", "rooms": [{"name": "general"}]}, f)
 
     palace_path = tmp_path / "palace"
@@ -1459,7 +1457,7 @@ def test_mine_no_tunnel_when_threshold_blocks_overlap(tmp_path, monkeypatch):
         project_root / "notes.md",
         "Some prose long enough to make a chunk. " * 20,
     )
-    with open(project_root / "mempalace.yaml", "w") as f:
+    with open(project_root / "mempalace.yaml", "w", encoding="utf-8") as f:
         yaml.dump({"wing": "wing_two", "rooms": [{"name": "general"}]}, f)
 
     palace_path = tmp_path / "palace"
@@ -1488,7 +1486,7 @@ def test_mine_no_tunnel_when_only_one_wing_has_topics(tmp_path, monkeypatch):
         project_root / "notes.md",
         "Some prose long enough to make a chunk. " * 20,
     )
-    with open(project_root / "mempalace.yaml", "w") as f:
+    with open(project_root / "mempalace.yaml", "w", encoding="utf-8") as f:
         yaml.dump({"wing": "wing_one", "rooms": [{"name": "general"}]}, f)
 
     palace_path = tmp_path / "palace"
@@ -1507,7 +1505,7 @@ def _make_minable_project(project_root: Path, n_files: int = 3) -> None:
             project_root / f"f{idx}.py",
             f"def fn_{idx}():\n    print('hi {idx}')\n" * 20,
         )
-    with open(project_root / "mempalace.yaml", "w") as f:
+    with open(project_root / "mempalace.yaml", "w", encoding="utf-8") as f:
         yaml.dump(
             {
                 "wing": "interrupt_test",
@@ -1736,13 +1734,11 @@ def test_mine_summary_separates_chunk_cap_skips(tmp_path, monkeypatch, capsys):
     _make_minable_project(project_root, n_files=3)
     palace_path = project_root / "palace"
 
-    seq = iter(
-        [
-            (5, "general", None),
-            (0, "general", "chunk_cap"),
-            (0, "general", None),
-        ]
-    )
+    seq = iter([
+        (5, "general", None),
+        (0, "general", "chunk_cap"),
+        (0, "general", None),
+    ])
 
     def fake_process_file(*args, **kwargs):
         return next(seq)
@@ -1846,13 +1842,11 @@ def test_mine_dry_run_summary_counts_chunk_cap_drops(tmp_path, capsys):
     _make_minable_project(project_root, n_files=3)
     palace_path = project_root / "palace"
 
-    seq = iter(
-        [
-            (5, "general", None),
-            (0, "general", "chunk_cap"),
-            (4, "general", None),
-        ]
-    )
+    seq = iter([
+        (5, "general", None),
+        (0, "general", "chunk_cap"),
+        (4, "general", None),
+    ])
 
     def fake_process_file(*args, **kwargs):
         return next(seq)

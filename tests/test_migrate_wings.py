@@ -14,13 +14,11 @@ from mempalace.migrate import migrate_wing_names, plan_wing_renames
 
 
 def test_plan_renames_strips_leading_and_trailing():
-    summary, updates = plan_wing_renames(
-        [
-            ("d1", {"wing": "_alpha", "room": "r"}),
-            ("d2", {"wing": "beta_", "room": "r"}),
-            ("d3", {"wing": "clean", "room": "r"}),
-        ]
-    )
+    summary, updates = plan_wing_renames([
+        ("d1", {"wing": "_alpha", "room": "r"}),
+        ("d2", {"wing": "beta_", "room": "r"}),
+        ("d3", {"wing": "clean", "room": "r"}),
+    ])
     assert dict(summary) == {("_alpha", "alpha"): 1, ("beta_", "beta"): 1}
     assert {u[0] for u in updates} == {"d1", "d2"}
     # only 'wing' is rewritten; other metadata is preserved
@@ -37,24 +35,20 @@ def test_plan_renames_noop_for_clean_wings():
 
 
 def test_plan_renames_ignores_empty_nonstring_and_all_separator():
-    _, updates = plan_wing_renames(
-        [
-            ("a", {"wing": "_"}),  # normalizes to "" -> skip (never strand a drawer)
-            ("b", {"wing": ""}),
-            ("c", {"wing": None}),
-            ("d", {}),
-        ]
-    )
+    _, updates = plan_wing_renames([
+        ("a", {"wing": "_"}),  # normalizes to "" -> skip (never strand a drawer)
+        ("b", {"wing": ""}),
+        ("c", {"wing": None}),
+        ("d", {}),
+    ])
     assert updates == []
 
 
 def test_plan_renames_collision_maps_both_to_same_target():
-    _, updates = plan_wing_renames(
-        [
-            ("d1", {"wing": "_gamma"}),
-            ("d2", {"wing": "gamma_"}),
-        ]
-    )
+    _, updates = plan_wing_renames([
+        ("d1", {"wing": "_gamma"}),
+        ("d2", {"wing": "gamma_"}),
+    ])
     assert {u[1]["wing"] for u in updates} == {"gamma"}
 
 

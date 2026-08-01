@@ -374,7 +374,7 @@ class MempalaceConfig:
 
         if self._config_file.exists():
             try:
-                with open(self._config_file, "r") as f:
+                with open(self._config_file, "r", encoding="utf-8") as f:
                     self._file_config = json.load(f)
             except (json.JSONDecodeError, OSError):
                 self._file_config = {}
@@ -550,7 +550,7 @@ class MempalaceConfig:
         """Mapping of name variants to canonical names."""
         if self._people_map_file.exists():
             try:
-                with open(self._people_map_file, "r") as f:
+                with open(self._people_map_file, "r", encoding="utf-8") as f:
                     return json.load(f)
             except (json.JSONDecodeError, OSError):
                 pass
@@ -951,18 +951,16 @@ class MempalaceConfig:
                 )
             )
 
-        candidates.extend(
-            [
-                RoutingPolicyCandidate(
-                    f"config write_routing.{normalized_scope}",
-                    routing_config.get(normalized_scope),
-                ),
-                RoutingPolicyCandidate(
-                    "config write_routing.default",
-                    routing_config.get("default"),
-                ),
-            ]
-        )
+        candidates.extend([
+            RoutingPolicyCandidate(
+                f"config write_routing.{normalized_scope}",
+                routing_config.get(normalized_scope),
+            ),
+            RoutingPolicyCandidate(
+                "config write_routing.default",
+                routing_config.get("default"),
+            ),
+        ])
 
         if normalized_scope == "hooks":
             hooks_config = self._file_config.get("hooks", {})
@@ -1041,7 +1039,7 @@ class MempalaceConfig:
                 "topic_wings": DEFAULT_TOPIC_WINGS,
                 "hall_keywords": DEFAULT_HALL_KEYWORDS,
             }
-            with open(self._config_file, "w") as f:
+            with open(self._config_file, "w", encoding="utf-8") as f:
                 json.dump(default_config, f, indent=2)
             # Restrict config file to owner read/write only
             try:
@@ -1057,7 +1055,7 @@ class MempalaceConfig:
             people_map: Dict mapping name variants to canonical names.
         """
         self._config_dir.mkdir(parents=True, exist_ok=True)
-        with open(self._people_map_file, "w") as f:
+        with open(self._people_map_file, "w", encoding="utf-8") as f:
             json.dump(people_map, f, indent=2)
         try:
             self._people_map_file.chmod(0o600)

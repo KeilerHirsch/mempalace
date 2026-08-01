@@ -18,7 +18,7 @@ from mempalace.palace import MineAlreadyRunning, file_already_mined, prefetch_mi
 
 def test_convo_mining():
     tmpdir = tempfile.mkdtemp()
-    with open(os.path.join(tmpdir, "chat.txt"), "w") as f:
+    with open(os.path.join(tmpdir, "chat.txt"), "w", encoding="utf-8") as f:
         f.write(
             "> What is memory?\nMemory is persistence.\n\n> Why does it matter?\nIt enables continuity.\n\n> How do we build it?\nWith structured storage.\n"
         )
@@ -42,7 +42,7 @@ def test_mine_convos_does_not_reprocess_short_files(capsys):
     tmpdir = tempfile.mkdtemp()
     try:
         # A file too short to produce any chunks
-        with open(os.path.join(tmpdir, "tiny.txt"), "w") as f:
+        with open(os.path.join(tmpdir, "tiny.txt"), "w", encoding="utf-8") as f:
             f.write("hi")
 
         palace_path = os.path.join(tmpdir, "palace")
@@ -71,7 +71,7 @@ def test_mine_convos_does_not_reprocess_empty_chunk_files(capsys):
     try:
         # Content long enough to pass MIN_CHUNK_SIZE but with no exchange markers
         # (no "> " lines), so chunk_exchanges returns []
-        with open(os.path.join(tmpdir, "no_exchanges.txt"), "w") as f:
+        with open(os.path.join(tmpdir, "no_exchanges.txt"), "w", encoding="utf-8") as f:
             f.write("This is a plain paragraph without any exchange markers. " * 5)
 
         palace_path = os.path.join(tmpdir, "palace")
@@ -213,7 +213,7 @@ def _hold_palace_lock_in_child(palace_path, ready_flag, release_flag):
     from mempalace.palace import mine_palace_lock as _mpl
 
     with _mpl(palace_path):
-        open(ready_flag, "w").close()
+        open(ready_flag, "w", encoding="utf-8").close()
         for _ in range(500):
             if _os.path.exists(release_flag):
                 return
@@ -255,7 +255,7 @@ def test_mine_convos_refuses_concurrent_run_against_same_palace(tmp_path, monkey
         with pytest.raises(MineAlreadyRunning):
             mine_convos(str(convo_dir), palace_path, wing="test")
     finally:
-        open(release_flag, "w").close()
+        open(release_flag, "w", encoding="utf-8").close()
         holder.join(timeout=10)
         if holder.is_alive():
             holder.terminate()
@@ -293,7 +293,7 @@ def test_mine_convos_dry_run_bypasses_palace_lock(tmp_path, monkeypatch):
         # Must not raise — dry-run skips the lock entirely.
         mine_convos(str(convo_dir), palace_path, wing="test", dry_run=True)
     finally:
-        open(release_flag, "w").close()
+        open(release_flag, "w", encoding="utf-8").close()
         holder.join(timeout=10)
         if holder.is_alive():
             holder.terminate()
@@ -432,7 +432,7 @@ def test_mine_convos_limit_skips_already_mined(capsys):
             "Sure, topic {i} has many facets worth exploring in detail.\n"
         )
         for i in range(4):
-            with open(os.path.join(tmpdir, f"chat_{i}.txt"), "w") as f:
+            with open(os.path.join(tmpdir, f"chat_{i}.txt"), "w", encoding="utf-8") as f:
                 f.write(convo_text.format(i=i))
 
         palace_path = os.path.join(tmpdir, "palace")
@@ -441,7 +441,7 @@ def test_mine_convos_limit_skips_already_mined(capsys):
         capsys.readouterr()
 
         for i in range(4, 7):
-            with open(os.path.join(tmpdir, f"chat_{i}.txt"), "w") as f:
+            with open(os.path.join(tmpdir, f"chat_{i}.txt"), "w", encoding="utf-8") as f:
                 f.write(convo_text.format(i=i))
 
         mine_convos(tmpdir, palace_path, wing="test", limit=2)

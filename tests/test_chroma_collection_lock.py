@@ -85,7 +85,7 @@ def _hold_lock(palace_path: str, ready_flag: str, release_flag: str) -> int:
     """
     try:
         with mine_palace_lock(palace_path):
-            open(ready_flag, "w").close()
+            open(ready_flag, "w", encoding="utf-8").close()
             for _ in range(500):
                 if os.path.exists(release_flag):
                     return 0
@@ -129,7 +129,7 @@ def test_palace_path_none_skips_lock(tmp_path, monkeypatch):
         col.upsert(documents=["doc"], ids=["id-1"])
         assert fake.upserts == [{"documents": ["doc"], "ids": ["id-1"]}]
     finally:
-        open(release, "w").close()
+        open(release, "w", encoding="utf-8").close()
         holder.join(timeout=5)
 
 
@@ -174,7 +174,7 @@ def test_writer_blocks_during_mine(tmp_path, monkeypatch):
         assert fake.updates == []
         assert fake.deletes == []
     finally:
-        open(release, "w").close()
+        open(release, "w", encoding="utf-8").close()
         holder.join(timeout=5)
 
 
@@ -321,5 +321,5 @@ def test_read_path_does_not_acquire_lock(tmp_path, monkeypatch):
                 f"{read_attr} must NOT acquire the write lock (read path)"
             )
     finally:
-        open(release, "w").close()
+        open(release, "w", encoding="utf-8").close()
         holder.join(timeout=5)

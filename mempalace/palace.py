@@ -107,14 +107,14 @@ def _enforce_embedder_identity(collection, palace_path, collection_name, *, crea
     current: Optional[EmbedderIdentity] = None
     try:
         effective = collection.effective_embedder_identity()
-    except Exception:
+    except Exception:  # noqa: BLE001 - bookkeeping errors must never break memory ops
         effective = None
     if effective is not None and getattr(effective, "model_name", ""):
         current = effective
     else:
         try:
             model_name = current_model_name()
-        except Exception:
+        except Exception:  # noqa: BLE001 - fail-open by design, aborts the identity check
             return
         if not model_name:
             return  # nameless embedder — cannot enforce identity
@@ -127,26 +127,26 @@ def _enforce_embedder_identity(collection, palace_path, collection_name, *, crea
 
     try:
         stored = collection.get_stored_embedder_identity()
-    except Exception:
+    except Exception:  # noqa: BLE001 - fails open per documented contract
         logger.debug("embedder-identity read failed for %s", collection_name, exc_info=True)
         return
     try:
         state = check_embedder_identity(stored, current)
     except (EmbedderIdentityMismatchError, DimensionMismatchError):
         raise  # deliberate, user-facing — the whole point of the contract
-    except Exception:
+    except Exception:  # noqa: BLE001 - generic mismatch swallowed, deliberate ones re-raised above
         return
 
     if state == "unknown" and stored is None:
         try:
             count = collection.count()
-        except Exception:
+        except Exception:  # noqa: BLE001 - count=None short-circuits both branches, safe no-op
             count = None
         if count == 0:
             if create:
                 try:
                     collection.set_embedder_identity(current)
-                except Exception:
+                except Exception:  # noqa: BLE001 - pure bookkeeping, logged at debug
                     logger.debug("embedder-identity record failed", exc_info=True)
         elif count:
             warnings.warn(
@@ -245,7 +245,18 @@ def set_palace_embedder_identity(
     )
     try:
         old = collection.get_stored_embedder_identity()
-    except Exception:
+    except Exception as exc:
+        # A read failure tells us NOTHING about whether a different identity
+        # is recorded — it is not the same as "no identity was ever
+        # recorded". Treating it as None would let a transient error bypass
+        # the mismatch guard below and silently overwrite a possibly
+        # different, incompatible embedder identity without --force.
+        if not force:
+            raise EmbedderIdentityMismatchError(
+                f"could not read the palace's currently recorded embedder identity "
+                f"({type(exc).__name__}: {exc}); refusing to record {new.model_name!r} "
+                f"without --force, since a different identity may already be stored"
+            ) from exc
         old = None
     if old is not None and old.model_name != new.model_name and not force:
         raise EmbedderIdentityMismatchError(
@@ -284,7 +295,7 @@ def _config_backend_value(palace_path: str) -> Optional[str]:
             return None
         value = cfg._file_config.get("backend")
         return str(value).strip().lower() if value else None
-    except Exception:
+    except Exception:  # noqa: BLE001 - config-file read is one of five fallback tiers
         return None
 
 
@@ -449,62 +460,60 @@ CLOSET_EXTRACT_WINDOW = 5000  # how many chars of source content to scan for ent
 
 # Common capitalized words that look like proper nouns but are usually
 # sentence-starters or filler. Filtered out of entity extraction.
-_ENTITY_STOPLIST = frozenset(
-    {
-        "The",
-        "This",
-        "That",
-        "These",
-        "Those",
-        "When",
-        "Where",
-        "What",
-        "Why",
-        "Who",
-        "Which",
-        "How",
-        "After",
-        "Before",
-        "Then",
-        "Now",
-        "Here",
-        "There",
-        "And",
-        "But",
-        "Or",
-        "Yet",
-        "So",
-        "If",
-        "Else",
-        "Yes",
-        "No",
-        "Maybe",
-        "Okay",
-        "User",
-        "Assistant",
-        "System",
-        "Tool",
-        "Monday",
-        "Tuesday",
-        "Wednesday",
-        "Thursday",
-        "Friday",
-        "Saturday",
-        "Sunday",
-        "January",
-        "February",
-        "March",
-        "April",
-        "May",
-        "June",
-        "July",
-        "August",
-        "September",
-        "October",
-        "November",
-        "December",
-    }
-)
+_ENTITY_STOPLIST = frozenset({
+    "The",
+    "This",
+    "That",
+    "These",
+    "Those",
+    "When",
+    "Where",
+    "What",
+    "Why",
+    "Who",
+    "Which",
+    "How",
+    "After",
+    "Before",
+    "Then",
+    "Now",
+    "Here",
+    "There",
+    "And",
+    "But",
+    "Or",
+    "Yet",
+    "So",
+    "If",
+    "Else",
+    "Yes",
+    "No",
+    "Maybe",
+    "Okay",
+    "User",
+    "Assistant",
+    "System",
+    "Tool",
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday",
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+})
 
 
 _CANDIDATE_RX_CACHE = None
@@ -665,17 +674,25 @@ def _build_date_line_segment(drawer_metas):
     return f"{date_part}:L{line_start}-L{line_end}"
 
 
-def purge_file_closets(closets_col, source_file: str) -> None:
+def purge_file_closets(closets_col, source_file: str) -> bool:
     """Delete every closet associated with ``source_file``.
 
     Call this before ``upsert_closet_lines`` on a re-mine so stale topics
     from a prior schema/version don't survive in the closet collection.
     Mirrors the drawer-purge step in process_file().
+
+    Returns True if the purge succeeded, False if it failed. A failed purge
+    is not fatal to the caller's upsert (the failure is logged here at
+    debug), but callers should surface a False return so an operator can
+    tell "closets are current" from "closets may carry stale topics from a
+    prior schema/version" instead of both looking identical.
     """
     try:
         closets_col.delete(where={"source_file": source_file})
-    except Exception:
+        return True
+    except Exception:  # noqa: BLE001 - failure returned as False to caller, logged at debug
         logger.debug("Closet purge failed for %s", source_file, exc_info=True)
+        return False
 
 
 def upsert_closet_lines(closets_col, closet_id_base, lines, metadata):
@@ -732,11 +749,11 @@ def mine_lock(source_file: str):
     finally:
         try:
             _unlock_mine_lock_file(lf)
-        except Exception:
+        except Exception:  # noqa: BLE001 - releasing an already-used flock in finally, logged at debug
             logger.debug("Mine-lock release failed", exc_info=True)
         try:
             lf.close()
-        except Exception:
+        except Exception:  # noqa: BLE001 - closing the lock file handle in finally, logged at debug
             logger.debug("Mine-lock close failed", exc_info=True)
         _cleanup_mine_lock_file(lock_path)
 
@@ -821,7 +838,7 @@ def _acquire_open_mine_lock_file(lock_file, lock_path: str) -> bool:
         return True
     try:
         _unlock_mine_lock_file(lock_file)
-    except Exception:
+    except Exception:  # noqa: BLE001 - releasing a detected-stale lock handle, logged at debug
         logger.debug("Mine-lock stale-handle release failed", exc_info=True)
     return False
 
@@ -875,7 +892,7 @@ def _cleanup_mine_lock_file(lock_path: str) -> None:
             # os.remove should fail and we leave the rendezvous file in place.
             try:
                 _unlock_mine_lock_file(lf)
-            except Exception:
+            except Exception:  # noqa: BLE001 - Windows release-before-remove best-effort, logged at debug
                 logger.debug("Mine-lock cleanup release failed", exc_info=True)
                 acquired = False
                 return
@@ -899,7 +916,7 @@ def _cleanup_mine_lock_file(lock_path: str) -> None:
             if acquired:
                 try:
                     _unlock_mine_lock_file(lf)
-                except Exception:
+                except Exception:  # noqa: BLE001 - POSIX finally best-effort release, logged at debug
                     logger.debug("Mine-lock cleanup release failed", exc_info=True)
             lf.close()
 
@@ -1202,8 +1219,15 @@ def mine_palace_lock(palace_path: str):
                     import fcntl
 
                     fcntl.flock(lf, fcntl.LOCK_UN)
-            except Exception:
-                pass
+            except Exception:  # noqa: BLE001 - unlock is best-effort, but must not be silent
+                # A silently-failed unlock is a deadlock seed: the next
+                # writer waits on a lock this process never released. Surface
+                # it so the operator can see a stuck lock instead of guessing.
+                logger.warning(
+                    "palace unlock failed for %r; lock may remain held",
+                    getattr(lf, "name", lf),
+                    exc_info=True,
+                )
         lf.close()
 
 
@@ -1295,7 +1319,7 @@ def file_already_mined(
                 break
             offset += len(ids)
         return False
-    except Exception:
+    except Exception:  # noqa: BLE001 - documented safe-fail direction for this function
         return False
 
 
@@ -1348,6 +1372,6 @@ def prefetch_mined_set(
             if not batch["ids"]:
                 break
             offset += len(batch["ids"])
-    except Exception:
+    except Exception:  # noqa: BLE001 - partial count logged, callers fall back to per-file re-check
         logger.warning("prefetch_mined_set: partial fetch, %d files loaded", len(mined))
     return mined

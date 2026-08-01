@@ -58,7 +58,7 @@ def live(request, tmp_path):
     for col in created:
         try:
             col._client.drop_table(col._table)
-        except Exception:
+        except Exception:  # noqa: BLE001 - best-effort table drop in teardown
             pass
     backend.close()
 

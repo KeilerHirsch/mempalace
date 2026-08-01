@@ -40,9 +40,19 @@ logger = logging.getLogger(__name__)
 
 _DB_FILENAME = "sqlite_exact.sqlite3"
 _TOKEN_RE = re.compile(r"\w{2,}", re.UNICODE)
-_SUPPORTED_OPERATORS = frozenset(
-    {"$eq", "$ne", "$in", "$nin", "$and", "$or", "$contains", "$gt", "$gte", "$lt", "$lte"}
-)
+_SUPPORTED_OPERATORS = frozenset({
+    "$eq",
+    "$ne",
+    "$in",
+    "$nin",
+    "$and",
+    "$or",
+    "$contains",
+    "$gt",
+    "$gte",
+    "$lt",
+    "$lte",
+})
 
 
 def _utcnow() -> str:
@@ -529,14 +539,12 @@ class SQLiteExactCollection(BaseCollection):
                 continue
             if not _matches_where_document(doc or "", where_document):
                 continue
-            out.append(
-                {
-                    "id": doc_id,
-                    "document": doc or "",
-                    "metadata": meta,
-                    "embedding": emb_blob,
-                }
-            )
+            out.append({
+                "id": doc_id,
+                "document": doc or "",
+                "metadata": meta,
+                "embedding": emb_blob,
+            })
         return out
 
     def query(
@@ -774,7 +782,12 @@ class SQLiteExactCollection(BaseCollection):
     def maintenance_state(self) -> dict:
         try:
             rows = self.count()
-        except Exception:
+        except Exception:  # noqa: BLE001 - row_count failure logged; 0 flagged as unreliable not confirmed-empty
+            logger.warning(
+                "row count failed for maintenance_state; reporting 0 "
+                "(may be an unreliable-empty, not a confirmed-empty collection)",
+                exc_info=True,
+            )
             rows = 0
         # vector_index is null by design — exact cosine over every row, no ANN.
         state = {"row_count": rows, "vector_index": None}
@@ -784,7 +797,7 @@ class SQLiteExactCollection(BaseCollection):
                 freelist = cur.execute("PRAGMA freelist_count").fetchone()
             state["page_count"] = int(page_count[0]) if page_count else 0
             state["freelist_pages"] = int(freelist[0]) if freelist else 0
-        except Exception:
+        except Exception:  # noqa: BLE001 - purely cosmetic diagnostic stats
             pass
         return state
 
@@ -831,17 +844,15 @@ class SQLiteExactCollection(BaseCollection):
 
 class SQLiteExactBackend(BaseBackend):
     name = "sqlite_exact"
-    capabilities = frozenset(
-        {
-            "requires_explicit_embeddings",
-            "supports_embeddings_in",
-            "supports_embeddings_passthrough",
-            "supports_embeddings_out",
-            "supports_metadata_filters",
-            "supports_lexical_search",
-            "local_mode",
-        }
-    )
+    capabilities = frozenset({
+        "requires_explicit_embeddings",
+        "supports_embeddings_in",
+        "supports_embeddings_passthrough",
+        "supports_embeddings_out",
+        "supports_metadata_filters",
+        "supports_lexical_search",
+        "local_mode",
+    })
     # "reindex" is intentionally omitted: sqlite_exact does exact cosine over
     # every row (no ANN index to build), so it has no analogue for it.
     maintenance_kinds = frozenset({"analyze", "compact"})

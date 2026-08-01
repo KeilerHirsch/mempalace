@@ -99,13 +99,11 @@ def test_new_policy_rejects_legacy_or_invalid_values(value):
 
 
 def test_resolver_returns_first_configured_candidate():
-    resolved = resolve_write_routing_policy(
-        [
-            RoutingPolicyCandidate("first", None),
-            RoutingPolicyCandidate("second", "require"),
-            RoutingPolicyCandidate("third", "direct"),
-        ]
-    )
+    resolved = resolve_write_routing_policy([
+        RoutingPolicyCandidate("first", None),
+        RoutingPolicyCandidate("second", "require"),
+        RoutingPolicyCandidate("third", "direct"),
+    ])
 
     assert resolved.policy is WriteRoutingPolicy.REQUIRE
     assert resolved.source == "second"
@@ -116,14 +114,12 @@ def test_resolver_names_invalid_source():
         WriteRoutingError,
         match="MEMPALACE_WRITE_ROUTING",
     ):
-        resolve_write_routing_policy(
-            [
-                RoutingPolicyCandidate(
-                    "MEMPALACE_WRITE_ROUTING",
-                    "typo",
-                )
-            ]
-        )
+        resolve_write_routing_policy([
+            RoutingPolicyCandidate(
+                "MEMPALACE_WRITE_ROUTING",
+                "typo",
+            )
+        ])
 
 
 @pytest.mark.parametrize(

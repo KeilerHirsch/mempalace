@@ -71,7 +71,7 @@ def _reset_mcp_cache():
                     if close is not None:
                         try:
                             close()
-                        except Exception:
+                        except Exception:  # noqa: BLE001 - best-effort cache close in teardown
                             pass
 
                 if hasattr(mcp_server, "_kg_by_path"):
@@ -86,7 +86,7 @@ def _reset_mcp_cache():
                     if callable(close):
                         try:
                             close()
-                        except Exception:
+                        except Exception:  # noqa: BLE001 - best-effort cache close in teardown
                             pass
                 mcp_server._client_cache = None
                 mcp_server._collection_cache = None
@@ -130,7 +130,7 @@ def _reset_mcp_cache():
                 for path in list(clients):
                     try:
                         backend.close_palace(path)
-                    except Exception:
+                    except Exception:  # noqa: BLE001 - best-effort handle close in teardown
                         pass
         except (ImportError, AttributeError):
             pass
@@ -180,7 +180,7 @@ def config(tmp_dir, palace_path):
     os.makedirs(cfg_dir)
     import json
 
-    with open(os.path.join(cfg_dir, "config.json"), "w") as f:
+    with open(os.path.join(cfg_dir, "config.json"), "w", encoding="utf-8") as f:
         json.dump({"palace_path": palace_path}, f)
     return MempalaceConfig(config_dir=cfg_dir)
 

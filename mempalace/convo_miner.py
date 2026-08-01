@@ -518,7 +518,7 @@ def _file_chunks_locked(
             delete_ids = _source_file_delete_ids(collection, source_file, extract_mode)
             if delete_ids:
                 collection.delete(ids=delete_ids)
-        except Exception:
+        except Exception:  # noqa: BLE001 - logged, subsequent upsert step follows
             logger.debug("Stale-drawer purge failed for %s", source_file, exc_info=True)
 
         # Batch chunks into bounded upserts so large transcripts keep most of
@@ -717,7 +717,7 @@ def _compute_hallways_for_wing_safe(wing, collection, drawers_filed, config=None
         from .hallways import compute_hallways_for_wing
 
         compute_hallways_for_wing(wing, col=collection, config=config)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - best-effort, must never fail an otherwise-good mine
         print(f"  (hallways skipped: {exc})")
 
 

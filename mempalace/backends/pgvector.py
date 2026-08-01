@@ -67,9 +67,19 @@ _TOKEN_RE = re.compile(r"\w{2,}", re.UNICODE)
 # Operators that translate to a JSONB containment predicate and so can be
 # pushed down to SQL. Comparisons, $or and $contains stay on the local exact
 # path (Python filtering), mirroring the Qdrant backend's local fallback.
-_SUPPORTED_OPERATORS = frozenset(
-    {"$eq", "$ne", "$in", "$nin", "$and", "$or", "$contains", "$gt", "$gte", "$lt", "$lte"}
-)
+_SUPPORTED_OPERATORS = frozenset({
+    "$eq",
+    "$ne",
+    "$in",
+    "$nin",
+    "$and",
+    "$or",
+    "$contains",
+    "$gt",
+    "$gte",
+    "$lt",
+    "$lte",
+})
 _PUSHDOWN_OPERATORS = frozenset({"$eq", "$ne", "$in", "$nin", "$and"})
 
 
@@ -476,7 +486,7 @@ class _PgVectorConfig:
             from ..config import MempalaceConfig
 
             cfg = MempalaceConfig()
-        except Exception:  # pragma: no cover - config import should be boring
+        except Exception:  # noqa: BLE001 - pragma: no cover - config import guarded, falls back to cfg=None
             cfg = None
         dsn = (
             options.get("dsn")
@@ -546,8 +556,10 @@ class _PgVectorClient:
             except Exception as exc:  # noqa: BLE001 - normalize to BackendError
                 try:
                     conn.rollback()
-                except Exception:  # pragma: no cover - rollback best effort
-                    pass
+                except Exception:  # noqa: BLE001 - rollback best effort, txn state unknown  # pragma: no cover
+                    # rollback after a failed commit failed: the connection is
+                    # left in an unknown transaction state; original error re-raised below.
+                    logger.warning("pgvector rollback after failed query failed", exc_info=True)
                 raise BackendError(f"pgvector query failed: {exc}") from exc
         return rows
 
@@ -773,8 +785,10 @@ class _PgVectorClient:
             if self._conn is not None:
                 try:
                     self._conn.close()
-                except Exception:  # pragma: no cover - close best effort
-                    pass
+                except Exception:  # noqa: BLE001 - close best effort, connection may leak  # pragma: no cover
+                    # conn.close() in backend close failed: the DB connection may
+                    # leak until the server times it out; the backend is still marked closed.
+                    logger.warning("pgvector connection close failed (leak)", exc_info=True)
                 self._conn = None
 
     @staticmethod
@@ -1283,19 +1297,17 @@ class PgVectorCollection(BaseCollection):
 
 class PgVectorBackend(BaseBackend):
     name = "pgvector"
-    capabilities = frozenset(
-        {
-            "requires_explicit_embeddings",
-            "supports_embeddings_in",
-            "supports_embeddings_passthrough",
-            "supports_embeddings_out",
-            "supports_metadata_filters",
-            "supports_lexical_search",
-            "supports_namespace_isolation",
-            "supports_server_side_indexes",
-            "server_mode",
-        }
-    )
+    capabilities = frozenset({
+        "requires_explicit_embeddings",
+        "supports_embeddings_in",
+        "supports_embeddings_passthrough",
+        "supports_embeddings_out",
+        "supports_metadata_filters",
+        "supports_lexical_search",
+        "supports_namespace_isolation",
+        "supports_server_side_indexes",
+        "server_mode",
+    })
     # "compact" is omitted: Postgres autovacuum reclaims space automatically,
     # so a manual VACUUM kind would be redundant. "reindex" builds the optional
     # HNSW index — an opt-in scale lever, NOT on by default, because it makes
@@ -1339,7 +1351,7 @@ class PgVectorBackend(BaseBackend):
     def _sanitized_dsn(self, dsn: str) -> dict:
         try:
             parsed = urlparse.urlparse(dsn)
-        except Exception:  # pragma: no cover - defensive
+        except Exception:  # noqa: BLE001 - pragma: no cover - defensive; diagnostic marker payload only
             return {"raw": ""}
         return {
             "host": parsed.hostname or "",
@@ -1349,13 +1361,11 @@ class PgVectorBackend(BaseBackend):
 
     def _marker_target(self, palace: PalaceRef, config: _PgVectorConfig) -> dict:
         target = self._sanitized_dsn(config.dsn)
-        target.update(
-            {
-                "namespace": config.namespace,
-                "palace_hash": self._palace_hash(palace),
-                "table_prefix": self._table_prefix(palace=palace, config=config),
-            }
-        )
+        target.update({
+            "namespace": config.namespace,
+            "palace_hash": self._palace_hash(palace),
+            "table_prefix": self._table_prefix(palace=palace, config=config),
+        })
         return target
 
     def _marker_exists(self, palace: PalaceRef) -> bool:

@@ -1316,13 +1316,11 @@ def test_mine_formats_passes_extract_mode_format_to_file_already_mined(monkeypat
     calls: list = []
 
     def fake_check(collection, source_file, check_mtime=False, extract_mode=None):
-        calls.append(
-            {
-                "source_file": source_file,
-                "check_mtime": check_mtime,
-                "extract_mode": extract_mode,
-            }
-        )
+        calls.append({
+            "source_file": source_file,
+            "check_mtime": check_mtime,
+            "extract_mode": extract_mode,
+        })
         return False  # never already mined — let the mine proceed
 
     monkeypatch.setattr(format_miner, "file_already_mined", fake_check)

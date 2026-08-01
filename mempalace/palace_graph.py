@@ -83,7 +83,7 @@ def _get_collection(config=None):
             collection_name=config.collection_name,
             create=False,
         )
-    except Exception:
+    except Exception:  # noqa: BLE001 - returns None; build_graph() treats as empty graph
         return None
 
 
@@ -155,15 +155,13 @@ def build_graph(col=None, config=None):
             for i, wa in enumerate(wings):
                 for wb in wings[i + 1 :]:
                     for hall in data["halls"]:
-                        edges.append(
-                            {
-                                "room": room,
-                                "wing_a": wa,
-                                "wing_b": wb,
-                                "hall": hall,
-                                "count": data["count"],
-                            }
-                        )
+                        edges.append({
+                            "room": room,
+                            "wing_a": wa,
+                            "wing_b": wb,
+                            "hall": hall,
+                            "count": data["count"],
+                        })
 
     # Convert sets to lists for JSON serialization
     nodes = {}
@@ -230,16 +228,14 @@ def traverse(start_room: str, col=None, config=None, max_hops: int = 2):
             shared_wings = current_wings & set(data["wings"])
             if shared_wings:
                 visited.add(room)
-                results.append(
-                    {
-                        "room": room,
-                        "wings": data["wings"],
-                        "halls": data["halls"],
-                        "count": data["count"],
-                        "hop": depth + 1,
-                        "connected_via": sorted(shared_wings),
-                    }
-                )
+                results.append({
+                    "room": room,
+                    "wings": data["wings"],
+                    "halls": data["halls"],
+                    "count": data["count"],
+                    "hop": depth + 1,
+                    "connected_via": sorted(shared_wings),
+                })
                 if depth + 1 < max_hops:
                     frontier.append((room, depth + 1))
 
@@ -269,15 +265,13 @@ def find_tunnels(wing_a: str = None, wing_b: str = None, col=None, config=None):
         if norm_b and norm_b not in wings:
             continue
 
-        tunnels.append(
-            {
-                "room": room,
-                "wings": wings,
-                "halls": data["halls"],
-                "count": data["count"],
-                "recent": data["dates"][-1] if data["dates"] else "",
-            }
-        )
+        tunnels.append({
+            "room": room,
+            "wings": wings,
+            "halls": data["halls"],
+            "count": data["count"],
+            "recent": data["dates"][-1] if data["dates"] else "",
+        })
 
     if not tunnels and (wing_a or wing_b):
         logger.warning(
@@ -375,7 +369,7 @@ def _load_tunnels(config=None):
         try:
             with open(current_tunnel_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
-        except Exception:
+        except Exception:  # noqa: BLE001 - JSON parse failure logged, returns empty list
             logger.warning(
                 "Mempalace tunnels file '%s' is corrupt or unreadable; starting empty.",
                 current_tunnel_file,
@@ -474,7 +468,7 @@ def _check_room_exists(wing: str, room: str, col) -> bool:
     try:
         results = col.get(where={"$and": [{"wing": wing}, {"room": room}]}, limit=1, include=[])
         return len(results["ids"]) > 0
-    except Exception:
+    except Exception:  # noqa: BLE001 - fails open (allow tunnel creation), deliberate low-severity
         # If query fails, assume it's a temporary issue or permissions, and allow.
         logger.warning(
             "Error checking room existence in ChromaDB for %s/%s; allowing tunnel creation.",
@@ -664,27 +658,23 @@ def follow_tunnels(wing: str, room: str, col=None, config=None):
         tgt = t.get("target") or {}
 
         if _normalize_wing(src.get("wing")) == norm_wing and src.get("room") == room:
-            connections.append(
-                {
-                    "direction": "outgoing",
-                    "connected_wing": tgt["wing"],
-                    "connected_room": tgt["room"],
-                    "label": t.get("label", ""),
-                    "drawer_id": tgt.get("drawer_id"),
-                    "tunnel_id": t["id"],
-                }
-            )
+            connections.append({
+                "direction": "outgoing",
+                "connected_wing": tgt["wing"],
+                "connected_room": tgt["room"],
+                "label": t.get("label", ""),
+                "drawer_id": tgt.get("drawer_id"),
+                "tunnel_id": t["id"],
+            })
         elif _normalize_wing(tgt.get("wing")) == norm_wing and tgt.get("room") == room:
-            connections.append(
-                {
-                    "direction": "incoming",
-                    "connected_wing": src["wing"],
-                    "connected_room": src["room"],
-                    "label": t.get("label", ""),
-                    "drawer_id": src.get("drawer_id"),
-                    "tunnel_id": t["id"],
-                }
-            )
+            connections.append({
+                "direction": "incoming",
+                "connected_wing": src["wing"],
+                "connected_room": src["room"],
+                "label": t.get("label", ""),
+                "drawer_id": src.get("drawer_id"),
+                "tunnel_id": t["id"],
+            })
 
     if not connections:
         logger.warning("No explicit tunnels found for %s/%s", wing, room)
@@ -700,7 +690,7 @@ def follow_tunnels(wing: str, room: str, col=None, config=None):
                     did = c.get("drawer_id")
                     if did and did in drawer_map:
                         c["drawer_preview"] = drawer_map[did][:300]
-            except Exception:
+            except Exception:  # noqa: BLE001 - cosmetic hydration, just skips drawer_preview
                 logger.debug("Drawer preview hydration failed", exc_info=True)
 
     return connections

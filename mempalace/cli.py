@@ -503,7 +503,7 @@ def _maybe_run_mine_after_init(args, cfg) -> None:
                 # will skip them too.
                 continue
         size_str = _format_size_mb(total_bytes)
-    except Exception:
+    except Exception:  # noqa: BLE001 - size estimate optional, skips printing it on failure
         scanned_files = None
         file_count = None
         size_str = None
@@ -540,7 +540,7 @@ def _maybe_run_mine_after_init(args, cfg) -> None:
         # any KeyboardInterrupt that escapes (shouldn't happen) so the
         # shell still sees a clean interrupt rather than a swallowed one.
         raise
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - explicit CLI error boundary
         print(f"\n  ERROR: mine failed: {e}", file=sys.stderr)
         sys.exit(1)
 
@@ -766,7 +766,7 @@ def cmd_sync(args):
     except ValueError as exc:
         print(f"mempalace: {exc}", file=sys.stderr)
         sys.exit(2)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - explicit CLI error boundary
         print(f"mempalace: sync failed: {exc}", file=sys.stderr)
         sys.exit(1)
 
@@ -1221,12 +1221,24 @@ def cmd_repair(args):
         print_sqlite_integrity_abort(palace_path, sqlite_errors)
         sys.exit(1)
 
-    preflight = maybe_repair_poisoned_max_seq_id_before_rebuild(
-        palace_path,
-        backup=getattr(args, "backup", True),
-        dry_run=getattr(args, "dry_run", False),
-        assume_yes=getattr(args, "yes", False),
-    )
+    from .repair import PoisonDetectionAborted
+
+    try:
+        preflight = maybe_repair_poisoned_max_seq_id_before_rebuild(
+            palace_path,
+            backup=getattr(args, "backup", True),
+            dry_run=getattr(args, "dry_run", False),
+            assume_yes=getattr(args, "yes", False),
+        )
+    except PoisonDetectionAborted as exc:
+        print(f"\n  Error: {exc}")
+        print(
+            "  Could not determine whether the palace has a poisoned "
+            "max_seq_id bookmark. Continuing into the rebuild would risk "
+            "discarding queued writes if it is poisoned. Re-run once the "
+            "underlying issue is resolved."
+        )
+        sys.exit(1)
     if preflight is not None:
         return
 
@@ -1242,7 +1254,7 @@ def cmd_repair(args):
         col = backend.get_collection(palace_path, collection_name)
         total = col.count()
         print(f"  Drawers found: {total}")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - prints error + recovery guidance, returns cleanly
         print(f"  Error reading palace: {e}")
         print(index_read_recovery_guidance())
         return
@@ -1314,7 +1326,7 @@ def cmd_repair(args):
                     shutil.rmtree(palace_path)
                 shutil.copytree(backup_path, palace_path)
                 print(f"  Restore complete from backup: {backup_path}")
-            except Exception as restore_error:
+            except Exception as restore_error:  # noqa: BLE001 - already-failed repair path, prints manual steps
                 print(f"  Automatic restore failed: {restore_error}")
                 print("  Manual recovery required:")
                 print(f"    1. Remove or rename the broken directory: {palace_path}")
@@ -1564,10 +1576,12 @@ def cmd_compress(args):
             if where:
                 kwargs["where"] = where
             batch = col.get(**kwargs)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - failure surfaced to user below (error+exit or incomplete-run warning)
             if not docs:
                 print(f"\n  Error reading drawers: {e}")
                 sys.exit(1)
+            print(f"\n  Warning: drawer listing failed after {len(docs)} drawers fetched: {e}")
+            print("  Compressing only the drawers fetched so far — this run is INCOMPLETE.")
             break
         batch_docs = batch.get("documents", [])
         if not batch_docs:
@@ -1634,7 +1648,7 @@ def cmd_compress(args):
             print(
                 f"  Stored {len(compressed_entries)} compressed drawers in 'mempalace_closets' collection."
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - explicit CLI error boundary
             print(f"  Error storing compressed drawers: {e}")
             sys.exit(1)
 

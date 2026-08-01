@@ -613,37 +613,31 @@ class TestHandleRequest:
     def test_initialize_negotiates_client_version(self):
         from mempalace.mcp_server import handle_request
 
-        resp = handle_request(
-            {
-                "method": "initialize",
-                "id": 1,
-                "params": {"protocolVersion": "2025-11-25"},
-            }
-        )
+        resp = handle_request({
+            "method": "initialize",
+            "id": 1,
+            "params": {"protocolVersion": "2025-11-25"},
+        })
         assert resp["result"]["protocolVersion"] == "2025-11-25"
 
     def test_initialize_negotiates_older_supported_version(self):
         from mempalace.mcp_server import handle_request
 
-        resp = handle_request(
-            {
-                "method": "initialize",
-                "id": 1,
-                "params": {"protocolVersion": "2025-03-26"},
-            }
-        )
+        resp = handle_request({
+            "method": "initialize",
+            "id": 1,
+            "params": {"protocolVersion": "2025-03-26"},
+        })
         assert resp["result"]["protocolVersion"] == "2025-03-26"
 
     def test_initialize_unknown_version_falls_back_to_latest(self):
         from mempalace.mcp_server import handle_request
 
-        resp = handle_request(
-            {
-                "method": "initialize",
-                "id": 1,
-                "params": {"protocolVersion": "9999-12-31"},
-            }
-        )
+        resp = handle_request({
+            "method": "initialize",
+            "id": 1,
+            "params": {"protocolVersion": "9999-12-31"},
+        })
         from mempalace.mcp_server import SUPPORTED_PROTOCOL_VERSIONS
 
         assert resp["result"]["protocolVersion"] == SUPPORTED_PROTOCOL_VERSIONS[0]
@@ -699,39 +693,33 @@ class TestHandleRequest:
 
         _client, _col = _get_collection(palace_path, create=True)
         del _client
-        resp = handle_request(
-            {
-                "method": "tools/call",
-                "id": 10,
-                "params": {"name": "mempalace_status", "arguments": None},
-            }
-        )
+        resp = handle_request({
+            "method": "tools/call",
+            "id": 10,
+            "params": {"name": "mempalace_status", "arguments": None},
+        })
         assert "error" not in resp
         assert resp["result"] is not None
 
     def test_unknown_tool(self):
         from mempalace.mcp_server import handle_request
 
-        resp = handle_request(
-            {
-                "method": "tools/call",
-                "id": 3,
-                "params": {"name": "nonexistent_tool", "arguments": {}},
-            }
-        )
+        resp = handle_request({
+            "method": "tools/call",
+            "id": 3,
+            "params": {"name": "nonexistent_tool", "arguments": {}},
+        })
         assert resp["error"]["code"] == -32601
 
     def test_tools_call_missing_params(self):
         from mempalace.mcp_server import handle_request
 
         for bad_params in [None, {}, {"arguments": {}}]:
-            resp = handle_request(
-                {
-                    "method": "tools/call",
-                    "id": 15,
-                    "params": bad_params,
-                }
-            )
+            resp = handle_request({
+                "method": "tools/call",
+                "id": 15,
+                "params": bad_params,
+            })
             assert resp["error"]["code"] == -32602
             assert "Invalid params" in resp["error"]["message"]
 
@@ -796,13 +784,11 @@ class TestHandleRequest:
         _client, _col = _get_collection(palace_path, create=True)
         del _client
 
-        resp = handle_request(
-            {
-                "method": "tools/call",
-                "id": 5,
-                "params": {"name": "mempalace_status", "arguments": {}},
-            }
-        )
+        resp = handle_request({
+            "method": "tools/call",
+            "id": 5,
+            "params": {"name": "mempalace_status", "arguments": {}},
+        })
         assert "result" in resp
         content = json.loads(resp["result"]["content"][0]["text"])
         assert "total_drawers" in content
@@ -2091,36 +2077,32 @@ class TestWriteTools:
 
         monkeypatch.setattr(mcp_server, "tool_add_drawer", _add)
 
-        resp = mcp_server.handle_request(
-            {
-                "method": "tools/call",
-                "id": 1,
-                "params": {
-                    "name": "mempalace_checkpoint",
-                    "arguments": {
-                        "items": [{"wing": "w", "room": "r", "content": "hi"}],
-                        "added_by": "alice",
-                    },
+        resp = mcp_server.handle_request({
+            "method": "tools/call",
+            "id": 1,
+            "params": {
+                "name": "mempalace_checkpoint",
+                "arguments": {
+                    "items": [{"wing": "w", "room": "r", "content": "hi"}],
+                    "added_by": "alice",
                 },
-            }
-        )
+            },
+        })
         assert "error" not in resp
         assert filed["added_by"] == "alice"
 
         filed.clear()
-        resp2 = mcp_server.handle_request(
-            {
-                "method": "tools/call",
-                "id": 2,
-                "params": {
-                    "name": "mempalace_checkpoint",
-                    "arguments": {
-                        "items": [{"wing": "w", "room": "r", "content": "yo"}],
-                        "diary": {"agent_name": "DeepSeek", "entry": "SESSION|z|star"},
-                    },
+        resp2 = mcp_server.handle_request({
+            "method": "tools/call",
+            "id": 2,
+            "params": {
+                "name": "mempalace_checkpoint",
+                "arguments": {
+                    "items": [{"wing": "w", "room": "r", "content": "yo"}],
+                    "diary": {"agent_name": "DeepSeek", "entry": "SESSION|z|star"},
                 },
-            }
-        )
+            },
+        })
         assert "error" not in resp2
         assert filed["added_by"] == "DeepSeek"
 
@@ -3006,16 +2988,14 @@ class TestDeleteBySource:
         assert "mempalace_delete_by_source" in names
 
         # Dispatches and defaults to dry-run (no destructive side effect)
-        resp = handle_request(
-            {
-                "method": "tools/call",
-                "id": 2,
-                "params": {
-                    "name": "mempalace_delete_by_source",
-                    "arguments": {"source_file": "results_mempal_hybrid_v4_session_1.jsonl"},
-                },
-            }
-        )
+        resp = handle_request({
+            "method": "tools/call",
+            "id": 2,
+            "params": {
+                "name": "mempalace_delete_by_source",
+                "arguments": {"source_file": "results_mempal_hybrid_v4_session_1.jsonl"},
+            },
+        })
         content = json.loads(resp["result"]["content"][0]["text"])
         assert content["dry_run"] is True
         assert content["match_count"] == 2
@@ -3121,7 +3101,8 @@ class TestKGTools:
         # Read raw row to verify all provenance columns persisted.
         with kg._lock:
             row = (
-                kg._conn()
+                kg
+                ._conn()
                 .execute(
                     "SELECT source_closet, source_file, source_drawer_id FROM triples WHERE id = ?",
                     (triple_id,),
@@ -4637,16 +4618,14 @@ class TestParamShapeDiagnostics:
     def test_missing_required_returns_32602_with_param_name(self):
         from mempalace.mcp_server import handle_request
 
-        resp = handle_request(
-            {
-                "method": "tools/call",
-                "id": 1,
-                "params": {
-                    "name": "mempalace_diary_write",
-                    "arguments": {"agent_name": "test"},
-                },
-            }
-        )
+        resp = handle_request({
+            "method": "tools/call",
+            "id": 1,
+            "params": {
+                "name": "mempalace_diary_write",
+                "arguments": {"agent_name": "test"},
+            },
+        })
         assert resp["error"]["code"] == -32602
         assert "'entry'" in resp["error"]["message"]
         assert "mempalace_diary_write" in resp["error"]["message"]
@@ -4659,13 +4638,11 @@ class TestParamShapeDiagnostics:
 
         monkeypatch.setitem(mcp_server.TOOLS["mempalace_status"], "handler", boom)
 
-        resp = mcp_server.handle_request(
-            {
-                "method": "tools/call",
-                "id": 2,
-                "params": {"name": "mempalace_status", "arguments": {}},
-            }
-        )
+        resp = mcp_server.handle_request({
+            "method": "tools/call",
+            "id": 2,
+            "params": {"name": "mempalace_status", "arguments": {}},
+        })
         assert resp["error"]["code"] == -32000
         assert resp["error"]["message"] == "Internal tool error"
         assert "unsupported operand" not in resp["error"]["message"]
@@ -4678,13 +4655,11 @@ class TestParamShapeDiagnostics:
 
         monkeypatch.setitem(mcp_server.TOOLS["mempalace_status"], "handler", boom)
 
-        resp = mcp_server.handle_request(
-            {
-                "method": "tools/call",
-                "id": 3,
-                "params": {"name": "mempalace_status", "arguments": {}},
-            }
-        )
+        resp = mcp_server.handle_request({
+            "method": "tools/call",
+            "id": 3,
+            "params": {"name": "mempalace_status", "arguments": {}},
+        })
         assert resp["error"]["code"] == -32000
         assert resp["error"]["message"] == "Internal tool error"
         assert "db schema" not in resp["error"]["message"]
@@ -4696,13 +4671,11 @@ class TestParamShapeDiagnostics:
         """
         from mempalace.mcp_server import handle_request
 
-        resp = handle_request(
-            {
-                "method": "tools/call",
-                "id": 4,
-                "params": {"name": "mempalace_diary_write", "arguments": {}},
-            }
-        )
+        resp = handle_request({
+            "method": "tools/call",
+            "id": 4,
+            "params": {"name": "mempalace_diary_write", "arguments": {}},
+        })
         assert resp["error"]["code"] == -32602
         message = resp["error"]["message"]
         assert "parameters" in message
@@ -4724,16 +4697,14 @@ class TestParamShapeDiagnostics:
             return {"success": True}
 
         monkeypatch.setitem(mcp_server.TOOLS["mempalace_diary_write"], "handler", capture)
-        resp = mcp_server.handle_request(
-            {
-                "method": "tools/call",
-                "id": 5,
-                "params": {
-                    "name": "mempalace_diary_write",
-                    "arguments": {"agent_name": "test", "content": "hello world"},
-                },
-            }
-        )
+        resp = mcp_server.handle_request({
+            "method": "tools/call",
+            "id": 5,
+            "params": {
+                "name": "mempalace_diary_write",
+                "arguments": {"agent_name": "test", "content": "hello world"},
+            },
+        })
         assert "error" not in resp
         assert captured.get("entry") == "hello world"
         assert "content" not in captured
@@ -4751,16 +4722,14 @@ class TestParamShapeDiagnostics:
             return {"success": True}
 
         monkeypatch.setitem(mcp_server.TOOLS["mempalace_diary_write"], "handler", capture)
-        resp = mcp_server.handle_request(
-            {
-                "method": "tools/call",
-                "id": 6,
-                "params": {
-                    "name": "mempalace_diary_write",
-                    "arguments": {"agent_name": "t", "entry": "real", "content": "alias"},
-                },
-            }
-        )
+        resp = mcp_server.handle_request({
+            "method": "tools/call",
+            "id": 6,
+            "params": {
+                "name": "mempalace_diary_write",
+                "arguments": {"agent_name": "t", "entry": "real", "content": "alias"},
+            },
+        })
         assert "error" not in resp
         assert captured.get("entry") == "real"
         assert "content" not in captured
@@ -4778,16 +4747,14 @@ class TestParamShapeDiagnostics:
             return {"success": True}
 
         monkeypatch.setitem(mcp_server.TOOLS["mempalace_diary_write"], "handler", capture)
-        resp = mcp_server.handle_request(
-            {
-                "method": "tools/call",
-                "id": 7,
-                "params": {
-                    "name": "mempalace_diary_write",
-                    "arguments": {"agent_name": "t", "entry": "", "content": "alias"},
-                },
-            }
-        )
+        resp = mcp_server.handle_request({
+            "method": "tools/call",
+            "id": 7,
+            "params": {
+                "name": "mempalace_diary_write",
+                "arguments": {"agent_name": "t", "entry": "", "content": "alias"},
+            },
+        })
         assert "error" not in resp
         assert captured.get("entry") == ""
         assert "content" not in captured
@@ -4808,13 +4775,11 @@ class TestParamShapeDiagnostics:
 
         monkeypatch.setitem(mcp_server.TOOLS["mempalace_status"], "handler", calling_handler)
 
-        resp = mcp_server.handle_request(
-            {
-                "method": "tools/call",
-                "id": 5,
-                "params": {"name": "mempalace_status", "arguments": {}},
-            }
-        )
+        resp = mcp_server.handle_request({
+            "method": "tools/call",
+            "id": 5,
+            "params": {"name": "mempalace_status", "arguments": {}},
+        })
         assert resp["error"]["code"] == -32000
         assert resp["error"]["message"] == "Internal tool error"
         assert "'req'" not in resp["error"]["message"]
@@ -4834,13 +4799,11 @@ class TestParamShapeDiagnostics:
 
         monkeypatch.setitem(mcp_server.TOOLS["mempalace_status"], "handler", boom)
 
-        resp = mcp_server.handle_request(
-            {
-                "method": "tools/call",
-                "id": 6,
-                "params": {"name": "mempalace_status", "arguments": {}},
-            }
-        )
+        resp = mcp_server.handle_request({
+            "method": "tools/call",
+            "id": 6,
+            "params": {"name": "mempalace_status", "arguments": {}},
+        })
         assert resp["error"]["code"] == -32000
         assert resp["error"]["message"] == "Internal tool error"
         assert "'foo'" not in resp["error"]["message"]
@@ -4860,16 +4823,14 @@ class TestUnknownParamName:
     def test_unknown_param_returns_32602_naming_the_wrong_kwarg(self):
         from mempalace.mcp_server import handle_request
 
-        resp = handle_request(
-            {
-                "method": "tools/call",
-                "id": 7,
-                "params": {
-                    "name": "mempalace_add_drawer",
-                    "arguments": {"wing": "w", "room": "r", "text": "hello"},
-                },
-            }
-        )
+        resp = handle_request({
+            "method": "tools/call",
+            "id": 7,
+            "params": {
+                "name": "mempalace_add_drawer",
+                "arguments": {"wing": "w", "room": "r", "text": "hello"},
+            },
+        })
         assert resp["error"]["code"] == -32602
         message = resp["error"]["message"]
         assert "'text'" in message
@@ -4881,16 +4842,14 @@ class TestUnknownParamName:
     def test_two_unknown_params_list_both_names(self):
         from mempalace.mcp_server import handle_request
 
-        resp = handle_request(
-            {
-                "method": "tools/call",
-                "id": 8,
-                "params": {
-                    "name": "mempalace_add_drawer",
-                    "arguments": {"wing": "w", "room": "r", "text": "a", "bogus": "b"},
-                },
-            }
-        )
+        resp = handle_request({
+            "method": "tools/call",
+            "id": 8,
+            "params": {
+                "name": "mempalace_add_drawer",
+                "arguments": {"wing": "w", "room": "r", "text": "a", "bogus": "b"},
+            },
+        })
         assert resp["error"]["code"] == -32602
         message = resp["error"]["message"]
         assert "parameters" in message
@@ -4909,20 +4868,18 @@ class TestUnknownParamName:
 
         monkeypatch.setitem(mcp_server.TOOLS["mempalace_diary_write"], "handler", stub)
 
-        resp = mcp_server.handle_request(
-            {
-                "method": "tools/call",
-                "id": 9,
-                "params": {
-                    "name": "mempalace_diary_write",
-                    "arguments": {
-                        "agent_name": "x",
-                        "entry": "y",
-                        "wait_for_previous": True,
-                    },
+        resp = mcp_server.handle_request({
+            "method": "tools/call",
+            "id": 9,
+            "params": {
+                "name": "mempalace_diary_write",
+                "arguments": {
+                    "agent_name": "x",
+                    "entry": "y",
+                    "wait_for_previous": True,
                 },
-            }
-        )
+            },
+        })
         assert "error" not in resp
         assert "result" in resp
 
@@ -4938,13 +4895,11 @@ class TestUnknownParamName:
 
         monkeypatch.setitem(mcp_server.TOOLS["mempalace_status"], "handler", passthrough)
 
-        resp = mcp_server.handle_request(
-            {
-                "method": "tools/call",
-                "id": 10,
-                "params": {"name": "mempalace_status", "arguments": {"bogus": 1}},
-            }
-        )
+        resp = mcp_server.handle_request({
+            "method": "tools/call",
+            "id": 10,
+            "params": {"name": "mempalace_status", "arguments": {"bogus": 1}},
+        })
         assert "error" not in resp
         assert "result" in resp
 
@@ -4980,21 +4935,19 @@ def test_peer_writer_guard_refuses_mutating_tool_before_handler(monkeypatch):
         lambda: (False, "busy writer"),
     )
 
-    response = mcp_server.handle_request(
-        {
-            "jsonrpc": "2.0",
-            "id": 7,
-            "method": "tools/call",
-            "params": {
-                "name": "mempalace_add_drawer",
-                "arguments": {
-                    "wing": "wing_test",
-                    "room": "room_test",
-                    "content": "hello",
-                },
+    response = mcp_server.handle_request({
+        "jsonrpc": "2.0",
+        "id": 7,
+        "method": "tools/call",
+        "params": {
+            "name": "mempalace_add_drawer",
+            "arguments": {
+                "wing": "wing_test",
+                "room": "room_test",
+                "content": "hello",
             },
-        }
-    )
+        },
+    })
 
     assert called["value"] is False
     assert response["error"]["code"] == -32001
@@ -5019,14 +4972,12 @@ def test_peer_writer_guard_does_not_gate_read_tool(monkeypatch):
     )
     monkeypatch.setattr(mcp_server, "_acquire_mcp_writer_lock", forbidden_lock)
 
-    response = mcp_server.handle_request(
-        {
-            "jsonrpc": "2.0",
-            "id": 8,
-            "method": "tools/call",
-            "params": {"name": "mempalace_status", "arguments": {}},
-        }
-    )
+    response = mcp_server.handle_request({
+        "jsonrpc": "2.0",
+        "id": 8,
+        "method": "tools/call",
+        "params": {"name": "mempalace_status", "arguments": {}},
+    })
 
     assert '"ok": true' in response["result"]["content"][0]["text"]
 
@@ -5135,14 +5086,12 @@ def test_sqlite_integrity_gate_refuses_non_status_tool(monkeypatch):
     )
     monkeypatch.setattr(mcp_server, "_sqlite_integrity_check_error", "")
 
-    response = mcp_server.handle_request(
-        {
-            "jsonrpc": "2.0",
-            "id": 1818,
-            "method": "tools/call",
-            "params": {"name": "mempalace_list_wings", "arguments": {}},
-        }
-    )
+    response = mcp_server.handle_request({
+        "jsonrpc": "2.0",
+        "id": 1818,
+        "method": "tools/call",
+        "params": {"name": "mempalace_list_wings", "arguments": {}},
+    })
 
     assert response["error"]["code"] == mcp_server._SQLITE_INTEGRITY_ERROR_CODE
     assert "integrity check failed" in response["error"]["message"]
@@ -5168,14 +5117,12 @@ def test_sqlite_integrity_status_surfaces_payload_without_chroma(monkeypatch):
         lambda: {"total_drawers": 123, "backend": "chroma"},
     )
 
-    response = mcp_server.handle_request(
-        {
-            "jsonrpc": "2.0",
-            "id": 1819,
-            "method": "tools/call",
-            "params": {"name": "mempalace_status", "arguments": {}},
-        }
-    )
+    response = mcp_server.handle_request({
+        "jsonrpc": "2.0",
+        "id": 1819,
+        "method": "tools/call",
+        "params": {"name": "mempalace_status", "arguments": {}},
+    })
 
     payload = json.loads(response["result"]["content"][0]["text"])
 
@@ -5279,14 +5226,12 @@ def test_sqlite_integrity_reconnect_allowed_when_corrupt(monkeypatch):
         },
     )
 
-    response = mcp_server.handle_request(
-        {
-            "jsonrpc": "2.0",
-            "id": 1820,
-            "method": "tools/call",
-            "params": {"name": "mempalace_reconnect", "arguments": {}},
-        }
-    )
+    response = mcp_server.handle_request({
+        "jsonrpc": "2.0",
+        "id": 1820,
+        "method": "tools/call",
+        "params": {"name": "mempalace_reconnect", "arguments": {}},
+    })
 
     assert called["value"] is True
     assert '"success": true' in response["result"]["content"][0]["text"]
@@ -5312,6 +5257,40 @@ def test_refresh_sqlite_integrity_status_records_quick_check_errors(monkeypatch)
     assert mcp_server._sqlite_integrity_checked is True
     assert len(mcp_server._sqlite_integrity_errors) == 1
     assert "malformed inverted index" in mcp_server._sqlite_integrity_errors[0]
+
+
+def test_refresh_sqlite_integrity_status_probe_crash_is_unknown_not_corrupt(monkeypatch):
+    """Regression: a crashed quick_check probe (e.g. sqlite3.DatabaseError)
+    must NOT be recorded as a data-integrity error. Before the fix, the
+    except-branch mis-assigned the crash into _sqlite_integrity_errors,
+    which made _sqlite_integrity_payload()['ok'] falsely report a healthy
+    palace as corrupted. The crash detail must still be visible via
+    _sqlite_integrity_check_error / payload['check_error']."""
+    from mempalace import mcp_server, repair
+
+    monkeypatch.setattr(mcp_server, "_is_chroma_backend", lambda: True)
+
+    def _boom(palace_path):
+        raise RuntimeError("disk I/O error")
+
+    monkeypatch.setattr(repair, "sqlite_integrity_errors", _boom)
+    monkeypatch.setattr(mcp_server, "_sqlite_integrity_checked", False)
+    monkeypatch.setattr(mcp_server, "_sqlite_integrity_errors", [])
+    monkeypatch.setattr(mcp_server, "_sqlite_integrity_check_error", "")
+
+    mcp_server._refresh_sqlite_integrity_status()
+
+    assert mcp_server._sqlite_integrity_checked is True
+    assert mcp_server._sqlite_integrity_errors == [], (
+        "a probe crash is not evidence of data corruption — errors list must stay empty"
+    )
+    assert "disk I/O error" in mcp_server._sqlite_integrity_check_error
+
+    monkeypatch.setattr(mcp_server, "_selected_backend_name", lambda: "chroma")
+    payload = mcp_server._sqlite_integrity_payload()
+    assert payload["ok"] is True, "probe crash must not falsely report the palace as corrupted"
+    assert payload["error_count"] == 0
+    assert "disk I/O error" in payload["check_error"]
 
 
 def test_refresh_sqlite_integrity_status_skips_oversized_db(monkeypatch, tmp_path):
@@ -5574,14 +5553,12 @@ def test_startup_preflight_does_not_block_initialize(monkeypatch):
         assert probe_started.wait(5), "preflight thread never started the probe"
 
         started = time.monotonic()
-        response = mcp_server.handle_request(
-            {
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "initialize",
-                "params": {"protocolVersion": "2024-11-05"},
-            }
-        )
+        response = mcp_server.handle_request({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {"protocolVersion": "2024-11-05"},
+        })
         elapsed = time.monotonic() - started
 
         assert response["result"]["serverInfo"]["name"] == "mempalace"

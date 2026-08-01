@@ -96,12 +96,10 @@ def test_collect_contexts_no_matches():
 
 
 def test_build_user_prompt_numbers_and_includes_contexts():
-    prompt = _build_user_prompt(
-        [
-            ("Alice", "uncertain", ["Alice said hi"]),
-            ("Bob", "project", []),
-        ]
-    )
+    prompt = _build_user_prompt([
+        ("Alice", "uncertain", ["Alice said hi"]),
+        ("Bob", "project", []),
+    ])
     assert "1. Alice" in prompt
     assert "2. Bob" in prompt
     assert "Alice said hi" in prompt

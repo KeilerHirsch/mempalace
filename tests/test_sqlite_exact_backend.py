@@ -603,7 +603,7 @@ def test_concurrent_first_open_single_connection_no_leak(tmp_path, monkeypatch):
             results[i] = backend.get_collection(
                 palace=palace, collection_name="drawers", create=True
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - capture thread error for main-thread assert
             errors.append(exc)
 
     threads = [threading.Thread(target=open_collection, args=(i,), daemon=True) for i in range(2)]

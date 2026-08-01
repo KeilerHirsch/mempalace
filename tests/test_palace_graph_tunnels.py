@@ -64,16 +64,14 @@ class TestTunnelStorage:
         """Regression for #1165 — tunnels.json reveals cross-wing links and
         must not be world-readable on shared Linux/multi-user systems."""
         tunnel_file = _use_tmp_tunnel_file(monkeypatch, tmp_path)
-        palace_graph._save_tunnels(
-            [
-                {
-                    "id": "x",
-                    "source": {"wing": "a", "room": "r1"},
-                    "target": {"wing": "b", "room": "r2"},
-                    "label": "",
-                }
-            ]
-        )
+        palace_graph._save_tunnels([
+            {
+                "id": "x",
+                "source": {"wing": "a", "room": "r1"},
+                "target": {"wing": "b", "room": "r2"},
+                "label": "",
+            }
+        ])
 
         file_mode = stat.S_IMODE(os.stat(tunnel_file).st_mode)
         assert file_mode == 0o600, f"tunnels.json mode is {oct(file_mode)}, expected 0o600"
@@ -461,26 +459,24 @@ class TestHyphenatedWingNormalization:
         ``"target": null``. The read-path filters must skip such rows
         instead of crashing the whole iteration with ``AttributeError``."""
         _use_tmp_tunnel_file(monkeypatch, tmp_path)
-        palace_graph._save_tunnels(
-            [
-                {
-                    "id": "broken",
-                    "source": None,
-                    "target": None,
-                    "label": "corrupt",
-                    "kind": "explicit",
-                    "created_at": "2026-05-01T00:00:00+00:00",
-                },
-                {
-                    "id": "ok",
-                    "source": {"wing": "wing_a", "room": "r1"},
-                    "target": {"wing": "wing_b", "room": "r2"},
-                    "label": "good",
-                    "kind": "explicit",
-                    "created_at": "2026-05-02T00:00:00+00:00",
-                },
-            ]
-        )
+        palace_graph._save_tunnels([
+            {
+                "id": "broken",
+                "source": None,
+                "target": None,
+                "label": "corrupt",
+                "kind": "explicit",
+                "created_at": "2026-05-01T00:00:00+00:00",
+            },
+            {
+                "id": "ok",
+                "source": {"wing": "wing_a", "room": "r1"},
+                "target": {"wing": "wing_b", "room": "r2"},
+                "label": "good",
+                "kind": "explicit",
+                "created_at": "2026-05-02T00:00:00+00:00",
+            },
+        ])
 
         # Both filters must skip the broken record and return the good one.
         assert {t["id"] for t in palace_graph.list_tunnels("wing_a")} == {"ok"}
@@ -493,18 +489,16 @@ class TestHyphenatedWingNormalization:
         queries with either hyphen or underscore must still find those
         records after the fix."""
         tunnel_file = _use_tmp_tunnel_file(monkeypatch, tmp_path)
-        palace_graph._save_tunnels(
-            [
-                {
-                    "id": "pre_1504_record",
-                    "source": {"wing": "mempalace_public", "room": "auth"},
-                    "target": {"wing": "wing_people", "room": "users"},
-                    "label": "pre-#1504 record",
-                    "kind": "explicit",
-                    "created_at": "2026-05-10T00:00:00+00:00",
-                }
-            ]
-        )
+        palace_graph._save_tunnels([
+            {
+                "id": "pre_1504_record",
+                "source": {"wing": "mempalace_public", "room": "auth"},
+                "target": {"wing": "wing_people", "room": "users"},
+                "label": "pre-#1504 record",
+                "kind": "explicit",
+                "created_at": "2026-05-10T00:00:00+00:00",
+            }
+        ])
         assert tunnel_file.exists()
 
         assert len(palace_graph.list_tunnels("mempalace_public")) == 1

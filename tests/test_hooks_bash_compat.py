@@ -50,7 +50,9 @@ pytestmark = pytest.mark.skipif(os.name == "nt", reason="bash hook scripts are P
 
 def _hook_src_no_comments(hook: Path) -> str:
     return "\n".join(
-        line for line in hook.read_text().splitlines() if not line.lstrip().startswith("#")
+        line
+        for line in hook.read_text(encoding="utf-8").splitlines()
+        if not line.lstrip().startswith("#")
     )
 
 
@@ -143,9 +145,11 @@ class TestSessionIdExtraction:
     def test_save_hook_extracts_session_id(self, tmp_path):
         out, _ = _run_hook(
             SAVE_HOOK,
-            json.dumps(
-                {"session_id": "abc12345", "stop_hook_active": False, "transcript_path": ""}
-            ),
+            json.dumps({
+                "session_id": "abc12345",
+                "stop_hook_active": False,
+                "transcript_path": "",
+            }),
             tmp_path,
         )
         # Stdout must be valid JSON; Claude Code parses it. A regression that

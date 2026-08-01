@@ -128,7 +128,7 @@ def ingest_diaries(
     else:
         try:
             state = json.loads(state_file.read_text())
-        except Exception:
+        except Exception:  # noqa: BLE001 - legacy state parse failure treated as empty, safe reset
             state = {}
 
     drawers_col = get_collection(palace_path)
@@ -203,7 +203,7 @@ def ingest_diaries(
             if full_rebuild:
                 try:
                     drawers_col.delete(where={"source_file": source_file})
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 - logged, load-bearing upsert unaffected
                     # ChromaDB ``delete(where=...)`` against an empty collection
                     # returns silently rather than raising, so this catch only
                     # fires on real backend errors (locked DB, schema mismatch,
@@ -242,15 +242,13 @@ def ingest_diaries(
                 if len(entry_text) <= chunk_size:
                     batch_ids.append(_diary_drawer_id_entry(wing, date_str, entry_idx, 0))
                     batch_docs.append(entry_text)
-                    batch_metas.append(
-                        {
-                            **base_meta,
-                            "chunk_index": global_chunk_index,
-                            "entry_index": entry_idx,
-                            "entry_chunk_index": 0,
-                            "entry_header_preview": header[:120],
-                        }
-                    )
+                    batch_metas.append({
+                        **base_meta,
+                        "chunk_index": global_chunk_index,
+                        "entry_index": entry_idx,
+                        "entry_chunk_index": 0,
+                        "entry_header_preview": header[:120],
+                    })
                     global_chunk_index += 1
                 else:
                     for entry_chunk_idx, start in enumerate(range(0, len(entry_text), chunk_size)):
@@ -258,15 +256,13 @@ def ingest_diaries(
                             _diary_drawer_id_entry(wing, date_str, entry_idx, entry_chunk_idx)
                         )
                         batch_docs.append(entry_text[start : start + chunk_size])
-                        batch_metas.append(
-                            {
-                                **base_meta,
-                                "chunk_index": global_chunk_index,
-                                "entry_index": entry_idx,
-                                "entry_chunk_index": entry_chunk_idx,
-                                "entry_header_preview": header[:120],
-                            }
-                        )
+                        batch_metas.append({
+                            **base_meta,
+                            "chunk_index": global_chunk_index,
+                            "entry_index": entry_idx,
+                            "entry_chunk_index": entry_chunk_idx,
+                            "entry_header_preview": header[:120],
+                        })
                         global_chunk_index += 1
 
             if batch_ids:
@@ -305,8 +301,11 @@ def ingest_diaries(
                         closet_meta["entities"] = entities
                     # On any full rebuild (force or detected content edit),
                     # wipe leftover closets from a prior run before re-writing.
-                    if full_rebuild:
-                        purge_file_closets(closets_col, source_file)
+                    if full_rebuild and not purge_file_closets(closets_col, source_file):
+                        logger.warning(
+                            "stale closet purge failed for %s; closets may retain topics from a prior run",
+                            source_file,
+                        )
                     n = upsert_closet_lines(closets_col, closet_id_base, all_lines, closet_meta)
                     closets_created += n
 
