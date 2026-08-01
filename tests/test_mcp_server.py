@@ -5358,14 +5358,12 @@ def test_startup_preflight_does_not_block_initialize(monkeypatch):
         assert probe_started.wait(5), "preflight thread never started the probe"
 
         started = time.monotonic()
-        response = mcp_server.handle_request(
-            {
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "initialize",
-                "params": {"protocolVersion": "2024-11-05"},
-            }
-        )
+        response = mcp_server.handle_request({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {"protocolVersion": "2024-11-05"},
+        })
         elapsed = time.monotonic() - started
 
         assert response["result"]["serverInfo"]["name"] == "mempalace"
