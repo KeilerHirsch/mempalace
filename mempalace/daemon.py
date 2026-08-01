@@ -617,7 +617,7 @@ class DaemonRuntime:
                 state = "succeeded" if ok else "failed"
                 error = None if ok else {"message": result.get("error", "job failed")}
                 self._safe_finish(job.id, state=state, result=result, error=error)
-            except (Exception, SystemExit) as exc:
+            except (Exception, SystemExit) as exc:  # noqa: BLE001 - captures error and marks job "failed"
                 # SystemExit is BaseException, not Exception — catching it here is
                 # deliberate. Without it, a sys.exit() in a dependency would slip
                 # past `except Exception`, kill this worker thread, leave the job
@@ -1097,7 +1097,11 @@ def start_daemon(
     # A non-blocking exclusive lock serializes the check-then-spawn; the loser
     # waits for the winner to finish coming up, then re-checks and reuses that
     # daemon. Cross-platform: fcntl.flock on POSIX, msvcrt.locking on Windows.
-    lock_fh = open(sd / "start.lock", "w") if (_fcntl is not None or _msvcrt is not None) else None
+    lock_fh = (
+        open(sd / "start.lock", "w", encoding="utf-8")
+        if (_fcntl is not None or _msvcrt is not None)
+        else None
+    )
     if lock_fh is not None:
         _chmod_private(sd / "start.lock")
         if not _try_lock_start_file(lock_fh):

@@ -277,14 +277,12 @@ class GitignoreMatcher:
             if not line:
                 continue
 
-            rules.append(
-                {
-                    "pattern": line,
-                    "anchored": anchored,
-                    "dir_only": dir_only,
-                    "negated": negated,
-                }
-            )
+            rules.append({
+                "pattern": line,
+                "anchored": anchored,
+                "dir_only": dir_only,
+                "negated": negated,
+            })
         return rules
 
     @classmethod
@@ -295,7 +293,7 @@ class GitignoreMatcher:
 
         try:
             lines = gitignore_path.read_text(encoding="utf-8", errors="replace").splitlines()
-        except Exception:
+        except Exception:  # noqa: BLE001 - malformed/unreadable gitignore treated as no rules
             return None
 
         rules = cls._parse_rules(lines)
@@ -518,7 +516,7 @@ def load_config(project_dir: str) -> dict:
                     }
                 ],
             }
-    with open(config_path) as f:
+    with open(config_path, encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
@@ -678,14 +676,12 @@ def chunk_text(
             # (gemini-code-assist, medium priority).
             line_start = content.count("\n", 0, start) + 1
             line_end = content.count("\n", 0, end) + 1
-            chunks.append(
-                {
-                    "content": chunk,
-                    "chunk_index": chunk_index,
-                    "line_start": line_start,
-                    "line_end": line_end,
-                }
-            )
+            chunks.append({
+                "content": chunk,
+                "chunk_index": chunk_index,
+                "line_start": line_start,
+                "line_end": line_end,
+            })
             chunk_index += 1
 
         start = end - chunk_overlap if end < len(content) else end
@@ -746,7 +742,11 @@ def _refresh_known_entities_cache() -> None:
                     names.update(str(n) for n in cat if n)
                 elif isinstance(cat, dict):
                     names.update(str(k) for k in cat.keys() if k)
-    except Exception:
+    except Exception:  # noqa: BLE001 - registry load failure logged, entity cache resets to empty
+        logger.warning(
+            "known_entities.json load/parse failed; entity recognition disabled for this mine",
+            exc_info=True,
+        )
         names = set()
         raw = {}
 
@@ -1143,7 +1143,7 @@ def _try_filename_date(source_file: str) -> Optional[str]:
         return dt.strftime("%Y-%m-%d")
     except (ValueError, OverflowError, ImportError):
         return None
-    except Exception:
+    except Exception:  # noqa: BLE001 - fallback tier in 5-tier date-extraction chain
         # dateutil can raise unexpected exceptions on weird input; treat as no match.
         return None
 
@@ -1175,7 +1175,7 @@ def _try_frontmatter_date(content: str) -> Optional[str]:
         import yaml
 
         data = yaml.safe_load(frontmatter_text)
-    except Exception:
+    except Exception:  # noqa: BLE001 - malformed YAML falls through to next tier
         return None
 
     if not isinstance(data, dict):
@@ -1196,7 +1196,7 @@ def _try_frontmatter_date(content: str) -> Optional[str]:
             return dt.strftime("%Y-%m-%d")
         except (ValueError, OverflowError, ImportError):
             continue
-        except Exception:
+        except Exception:  # noqa: BLE001 - same 5-tier fallback chain, field-loop dateutil parse
             continue
     return None
 
@@ -1271,7 +1271,7 @@ def _try_content_body_date(content: str) -> Optional[str]:
         return dt.strftime("%Y-%m-%d")
     except (ValueError, OverflowError, ImportError):
         return None
-    except Exception:
+    except Exception:  # noqa: BLE001 - same 5-tier fallback chain, final parse failure returns None
         return None
 
 
@@ -1480,7 +1480,7 @@ def process_file(
         # path entirely.
         try:
             collection.delete(where={"source_file": source_file})
-        except Exception:
+        except Exception:  # noqa: BLE001 - logged; subsequent upsert uses deterministic ids
             logger.debug("Stale-drawer purge failed for %s", source_file, exc_info=True)
 
         # Batch chunks into bounded upserts so the embedding model sees many
@@ -1569,7 +1569,11 @@ def process_file(
             }
             if entities:
                 closet_meta["entities"] = entities
-            purge_file_closets(closets_col, source_file)
+            if not purge_file_closets(closets_col, source_file):
+                logger.warning(
+                    "stale closet purge failed for %s; closets may retain topics from a prior run",
+                    source_file,
+                )
             upsert_closet_lines(closets_col, closet_id_base, closet_lines, closet_meta)
 
     return drawers_added, room, None
@@ -1881,7 +1885,7 @@ def _mine_impl(
                 tunnels_added = _compute_topic_tunnels_for_wing(wing)
                 if tunnels_added:
                     print(f"\n  Topic tunnels: +{tunnels_added} cross-wing link(s)")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - must never fail a mine, degrade quietly
                 # Tunnel computation must never fail a mine — degrade quietly.
                 print(
                     f"\n  WARNING: topic tunnel computation skipped — {e}",
@@ -1897,7 +1901,7 @@ def _mine_impl(
                 hallways_created = compute_hallways_for_wing(wing, col=collection)
                 if hallways_created:
                     print(f"\n  Hallways: +{len(hallways_created)} within-wing entity link(s)")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - same fault-tolerance pattern, must never fail a mine
                 print(
                     f"\n  WARNING: hallway computation skipped — {e}",
                     file=sys.stderr,
@@ -1913,7 +1917,7 @@ def _mine_impl(
                 entity_tunnels_added = _compute_entity_tunnels_for_wing(wing)
                 if entity_tunnels_added:
                     print(f"\n  Entity tunnels: +{entity_tunnels_added} cross-wing entity link(s)")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - same fault-tolerance pattern, derived analytic only
                 print(
                     f"\n  WARNING: entity tunnel computation skipped — {e}",
                     file=sys.stderr,
@@ -2021,7 +2025,7 @@ def _cleanup_mine_pid_file() -> None:
         pid_file = Path(pid_file_env)
         if not pid_file.exists():
             return
-        recorded = pid_file.read_text().strip()
+        recorded = pid_file.read_text(encoding="utf-8").strip()
         # PID file format: "{pid} {unix_timestamp}" (timestamp added in
         # #1552 for stale-by-age detection).  Old-format files (bare
         # "{pid}") are also handled: split on whitespace and take the

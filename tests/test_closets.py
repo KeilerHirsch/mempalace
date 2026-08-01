@@ -79,7 +79,7 @@ def _lock_worker(target: str, name: str, hold_seconds: float, log_path: str) -> 
         _time.sleep(hold_seconds)
         t_exit = _time.time()
         # Append atomically so concurrent writers don't stomp each other.
-        with open(log_path, "a") as f:
+        with open(log_path, "a", encoding="utf-8") as f:
             f.write(f"{name} {t_enter} {t_exit}\n")
             f.flush()
 
@@ -131,7 +131,7 @@ class TestMineLock:
 
         # Parse the log: "<name> <enter_ts> <exit_ts>".
         intervals = []
-        with open(log_path) as f:
+        with open(log_path, encoding="utf-8") as f:
             for line in f:
                 parts = line.strip().split()
                 if len(parts) == 3:
@@ -400,10 +400,22 @@ class TestPurgeFileClosets:
                 {"source_file": "/drop.md", "wing": "w", "room": "r"},
             ],
         )
-        purge_file_closets(col, "/drop.md")
+        assert purge_file_closets(col, "/drop.md") is True
         remaining_ids = set(col.get()["ids"])
         assert "closet_a_01" in remaining_ids
         assert "closet_b_01" not in remaining_ids
+
+    def test_returns_false_on_delete_failure(self, palace_path):
+        """Regression: a failed purge must be distinguishable from a
+        succeeded one. Before the fix, purge_file_closets returned None
+        unconditionally, so callers could not tell "closets are current"
+        from "delete raised and closets may carry stale topics"."""
+
+        class _BoomCollection:
+            def delete(self, **kw):
+                raise RuntimeError("backend unavailable")
+
+        assert purge_file_closets(_BoomCollection(), "/any.md") is False
 
 
 # ── project miner: closet rebuild end-to-end ──────────────────────────
@@ -847,15 +859,13 @@ class TestDiaryIngest:
         state_file = _state_file_for(str(palace_dir), diary_dir.resolve())
         state_file.parent.mkdir(parents=True, exist_ok=True)
         state_file.write_text(
-            json.dumps(
-                {
-                    f"diary|{diary_file.name}": {
-                        "size": len(text),
-                        "entry_count": 1,
-                        "ingested_at": "2026-04-12T00:00:00+00:00",
-                    }
+            json.dumps({
+                f"diary|{diary_file.name}": {
+                    "size": len(text),
+                    "entry_count": 1,
+                    "ingested_at": "2026-04-12T00:00:00+00:00",
                 }
-            )
+            })
         )
 
         # Run with no force — size matches, so this should skip ingest.
@@ -1337,7 +1347,7 @@ class TestTunnels:
         import mempalace.palace_graph as pg
 
         # Simulate a crash that left a truncated file behind.
-        with open(pg._get_tunnel_file(), "w") as f:
+        with open(pg._get_tunnel_file(), "w", encoding="utf-8") as f:
             f.write("{not valid json")
 
         # Load should return [] rather than raising.
@@ -1367,7 +1377,7 @@ class TestTunnels:
             try:
                 barrier.wait(timeout=2)
                 create_tunnel(f"wing_{i}", "r", "wing_shared", "hub")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - capture thread error for main-thread assert
                 errors.append(e)
 
         threads = [threading.Thread(target=worker, args=(i,)) for i in range(5)]

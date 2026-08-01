@@ -1730,13 +1730,11 @@ def test_run_hook_dispatches_stop(tmp_path):
         transcript,
         [{"message": {"role": "user", "content": f"msg {i}"}} for i in range(3)],
     )
-    stdin_data = json.dumps(
-        {
-            "session_id": "run-test",
-            "stop_hook_active": False,
-            "transcript_path": str(transcript),
-        }
-    )
+    stdin_data = json.dumps({
+        "session_id": "run-test",
+        "stop_hook_active": False,
+        "transcript_path": str(transcript),
+    })
     with patch("sys.stdin", io.StringIO(stdin_data)):
         with patch("mempalace.hooks_cli.STATE_DIR", tmp_path):
             with patch("mempalace.hooks_cli._output") as mock_output:

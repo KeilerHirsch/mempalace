@@ -202,7 +202,7 @@ def _log(message: str):
         log_path = STATE_DIR / "hook.log"
         is_new = not log_path.exists()
         timestamp = datetime.now().strftime("%H:%M:%S")
-        with open(log_path, "a") as f:
+        with open(log_path, "a", encoding="utf-8") as f:
             f.write(f"[{timestamp}] {message}\n")
         if is_new:
             try:
@@ -486,7 +486,7 @@ def _spawn_mine(cmd: list) -> None:
         return
     child_env = os.environ.copy()
     child_env[_MINE_PID_FILE_ENV] = str(pid_file)
-    with open(log_path, "a") as log_f:
+    with open(log_path, "a", encoding="utf-8") as log_f:
         try:
             proc = subprocess.Popen(
                 cmd,
@@ -512,7 +512,7 @@ def _spawn_mine(cmd: list) -> None:
 def _hooks_daemon_enabled() -> bool:
     try:
         return MempalaceConfig().hook_use_daemon is True
-    except Exception:
+    except Exception:  # noqa: BLE001 - config-read boolean guard, safe False default
         return False
 
 
@@ -540,7 +540,7 @@ def _daemon_available() -> bool:
             get_client_if_running(MempalaceConfig().palace_path, health_timeout=HOOK_PROBE_TIMEOUT)
             is not None
         )
-    except Exception:
+    except Exception:  # noqa: BLE001 - fast health probe, failure means "daemon not running"
         return False
 
 
@@ -602,14 +602,14 @@ def _maybe_auto_ingest():
                         dedupe_key=_daemon_mine_dedupe_key(mine_dir, mode),
                         wait=False,
                     )
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 - daemon already accepted job, must not fall back
                     # Daemon accepted context — don't fall back (would double-mine).
                     _log(f"Daemon mine submission failed: {exc}")
                 continue
             _spawn_mine([_mempalace_python(), "-m", "mempalace", "mine", mine_dir, "--mode", mode])
         except OSError:
             pass
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - hooks must never crash the user's shell
             # Non-daemon spawn path failed. Hooks must never crash the user's
             # shell — log and continue. Do not label this a daemon failure: the
             # daemon block above handles its own errors with its own message.
@@ -642,11 +642,11 @@ def _mine_sync():
                     result = job.get("result") or {}
                     if job.get("state") != "succeeded" or not result.get("success", True):
                         _log(f"Daemon sync mine failed: {result.get('error', job.get('error'))}")
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 - daemon already accepted job, must not fall back
                     # Daemon accepted context — don't fall back (would double-mine).
                     _log(f"Daemon sync mine submission failed: {exc}")
                 continue
-            with open(log_path, "a") as log_f:
+            with open(log_path, "a", encoding="utf-8") as log_f:
                 subprocess.run(
                     [
                         _mempalace_python(),
@@ -668,7 +668,7 @@ def _mine_sync():
                 )
         except (OSError, subprocess.TimeoutExpired):
             pass
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - hooks must never crash the user's shell
             # Non-daemon sync spawn path failed. Hooks must never crash the
             # user's shell — log and continue (not a daemon failure; the daemon
             # block above handles its own errors).
@@ -804,7 +804,7 @@ def _save_diary_direct(
                     wait=True,
                     timeout=30,
                 )
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - daemon accepted the checkpoint job
                 # Daemon accepted context — don't fall back (would double-write).
                 _log(f"Daemon diary checkpoint failed: {exc}")
                 return {"count": 0}
@@ -849,7 +849,7 @@ def _save_diary_direct(
             return {"count": len(messages), "themes": themes}
         else:
             _log(f"Diary checkpoint failed: {result.get('error', 'unknown')}")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - outer catch-all for diary-checkpoint function
         _log(f"Diary checkpoint error: {e}")
     return {"count": 0}
 
@@ -867,7 +867,8 @@ def _ingest_transcript(transcript_path: str):
 
     try:
         MempalaceConfig()  # validate config loads
-    except Exception:
+    except Exception as exc:  # noqa: BLE001 - config load failure logged and skipped, matches sibling except-blocks
+        _log(f"transcript ingest skipped: config load failed: {exc}")
         return
 
     try:
@@ -885,7 +886,7 @@ def _ingest_transcript(transcript_path: str):
                     wait=False,
                 )
                 _log(f"Transcript ingest submitted to daemon: {path.name}")
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - daemon accepted the mine job
                 # Daemon accepted context — don't fall back (would double-mine).
                 _log(f"Daemon transcript ingest failed: {exc}")
             return
@@ -893,23 +894,21 @@ def _ingest_transcript(transcript_path: str):
         # Route through ``_spawn_mine`` so the per-target PID guard kicks
         # in here too — repeated Stop/PreCompact fires for the same
         # transcript should not stack up parallel ingest mines.
-        _spawn_mine(
-            [
-                _mempalace_python(),
-                "-m",
-                "mempalace",
-                "mine",
-                str(path.parent),
-                "--mode",
-                "convos",
-                "--wing",
-                "sessions",
-            ]
-        )
+        _spawn_mine([
+            _mempalace_python(),
+            "-m",
+            "mempalace",
+            "mine",
+            str(path.parent),
+            "--mode",
+            "convos",
+            "--wing",
+            "sessions",
+        ])
         _log(f"Transcript ingest started: {path.name}")
     except OSError:
         pass
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - hooks must never crash the user's shell
         # Non-daemon ingest spawn path failed. Hooks must never crash the
         # user's shell — log and continue (not a daemon failure; the daemon
         # block above handles its own errors).
@@ -1139,7 +1138,7 @@ def hook_stop(data: dict, harness: str):
             config = MempalaceConfig()
             silent = config.hook_silent_save
             toast = config.hook_desktop_toast
-        except Exception:
+        except Exception:  # noqa: BLE001 - explicit fallback to safe defaults
             silent = True
             toast = False
 
@@ -1170,11 +1169,9 @@ def hook_stop(data: dict, harness: str):
                     tag = " \u2014 " + ", ".join(themes)
                 else:
                     tag = ""
-                _output(
-                    {
-                        "systemMessage": f"\u2726 {count} memories woven into the palace{tag}",
-                    }
-                )
+                _output({
+                    "systemMessage": f"\u2726 {count} memories woven into the palace{tag}",
+                })
             else:
                 _output({})
         else:
@@ -1269,7 +1266,7 @@ def hook_session_end(data: dict, harness: str):
             config = MempalaceConfig()
             auto_save = config.hooks_auto_save
             toast = config.hook_desktop_toast
-        except Exception:
+        except Exception:  # noqa: BLE001 - mirrors hook_stop, corrupt config must not lose the final save
             auto_save = True
             toast = False
 

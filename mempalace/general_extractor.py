@@ -430,22 +430,18 @@ def extract_memories(
         # the label is an approximation for sub-slices, not a fresh
         # classification.
         if len(content) <= chunk_size:
-            memories.append(
-                {
-                    "content": content,
-                    "memory_type": max_type,
-                    "chunk_index": len(memories),
-                }
-            )
+            memories.append({
+                "content": content,
+                "memory_type": max_type,
+                "chunk_index": len(memories),
+            })
             continue
         for i in range(0, len(content), chunk_size):
-            memories.append(
-                {
-                    "content": content[i : i + chunk_size],
-                    "memory_type": max_type,
-                    "chunk_index": len(memories),
-                }
-            )
+            memories.append({
+                "content": content[i : i + chunk_size],
+                "memory_type": max_type,
+                "chunk_index": len(memories),
+            })
 
     return memories
 

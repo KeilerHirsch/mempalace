@@ -102,12 +102,10 @@ class TestComputeHallways:
     def test_returns_empty_when_no_drawer_has_two_entities(self, tmp_path, monkeypatch):
         """A drawer must mention >= 2 entities to contribute a pair."""
         _use_tmp_hallway_file(monkeypatch, tmp_path)
-        col = _fake_collection(
-            [
-                {"wing": "wing_aya", "room": "diary", "entities": "Aya"},  # only one
-                {"wing": "wing_aya", "room": "diary", "entities": ""},  # none
-            ]
-        )
+        col = _fake_collection([
+            {"wing": "wing_aya", "room": "diary", "entities": "Aya"},  # only one
+            {"wing": "wing_aya", "room": "diary", "entities": ""},  # none
+        ])
         result = hallways_mod.compute_hallways_for_wing("wing_aya", col=col)
         assert result == []
 
@@ -117,13 +115,11 @@ class TestComputeHallways:
         With min_count=2, Aya↔Lumi appear together in 3 drawers; that's a hallway.
         """
         _use_tmp_hallway_file(monkeypatch, tmp_path)
-        col = _fake_collection(
-            [
-                {"wing": "wing_aya", "room": "diary", "entities": "Aya;Lumi"},
-                {"wing": "wing_aya", "room": "diary", "entities": "Aya;Lumi;Ever"},
-                {"wing": "wing_aya", "room": "letters", "entities": "Aya;Lumi"},
-            ]
-        )
+        col = _fake_collection([
+            {"wing": "wing_aya", "room": "diary", "entities": "Aya;Lumi"},
+            {"wing": "wing_aya", "room": "diary", "entities": "Aya;Lumi;Ever"},
+            {"wing": "wing_aya", "room": "letters", "entities": "Aya;Lumi"},
+        ])
         result = hallways_mod.compute_hallways_for_wing("wing_aya", col=col, min_count=2)
         # Find the Aya↔Lumi hallway (other pairs like Aya↔Ever might also be present)
         aya_lumi = [h for h in result if {h["entity_a"], h["entity_b"]} == {"Aya", "Lumi"}]
@@ -141,13 +137,11 @@ class TestComputeHallways:
         a valid hallway when they co-occur enough.
         """
         _use_tmp_hallway_file(monkeypatch, tmp_path)
-        col = _fake_collection(
-            [
-                {"wing": "wing_aya", "room": "diary", "entities": "Aya;consciousness"},
-                {"wing": "wing_aya", "room": "research", "entities": "Aya;consciousness"},
-                {"wing": "wing_aya", "room": "ideas", "entities": "Aya;consciousness;Lumi"},
-            ]
-        )
+        col = _fake_collection([
+            {"wing": "wing_aya", "room": "diary", "entities": "Aya;consciousness"},
+            {"wing": "wing_aya", "room": "research", "entities": "Aya;consciousness"},
+            {"wing": "wing_aya", "room": "ideas", "entities": "Aya;consciousness;Lumi"},
+        ])
         result = hallways_mod.compute_hallways_for_wing("wing_aya", col=col, min_count=2)
         aya_consciousness = [
             h for h in result if {h["entity_a"], h["entity_b"]} == {"Aya", "consciousness"}
@@ -159,24 +153,20 @@ class TestComputeHallways:
     def test_respects_min_count_threshold(self, tmp_path, monkeypatch):
         """min_count=3 filters out pairs that only co-occur twice."""
         _use_tmp_hallway_file(monkeypatch, tmp_path)
-        col = _fake_collection(
-            [
-                {"wing": "wing_aya", "room": "diary", "entities": "Aya;Lumi"},
-                {"wing": "wing_aya", "room": "letters", "entities": "Aya;Lumi"},
-            ]
-        )
+        col = _fake_collection([
+            {"wing": "wing_aya", "room": "diary", "entities": "Aya;Lumi"},
+            {"wing": "wing_aya", "room": "letters", "entities": "Aya;Lumi"},
+        ])
         result = hallways_mod.compute_hallways_for_wing("wing_aya", col=col, min_count=3)
         assert result == []
 
     def test_creates_deterministic_id_per_entity_pair(self, tmp_path, monkeypatch):
         """Same wing + same entity pair → same hallway id (idempotent re-runs)."""
         _use_tmp_hallway_file(monkeypatch, tmp_path)
-        col = _fake_collection(
-            [
-                {"wing": "wing_aya", "room": "diary", "entities": "Aya;Lumi"},
-                {"wing": "wing_aya", "room": "letters", "entities": "Aya;Lumi"},
-            ]
-        )
+        col = _fake_collection([
+            {"wing": "wing_aya", "room": "diary", "entities": "Aya;Lumi"},
+            {"wing": "wing_aya", "room": "letters", "entities": "Aya;Lumi"},
+        ])
         first = hallways_mod.compute_hallways_for_wing("wing_aya", col=col, min_count=2)
         _use_tmp_hallway_file(monkeypatch, tmp_path)
         second = hallways_mod.compute_hallways_for_wing("wing_aya", col=col, min_count=2)
@@ -189,12 +179,10 @@ class TestComputeHallways:
     def test_entity_pair_is_symmetric(self, tmp_path, monkeypatch):
         """Drawer says 'Aya;Lumi'; another says 'Lumi;Aya' — same hallway."""
         _use_tmp_hallway_file(monkeypatch, tmp_path)
-        col = _fake_collection(
-            [
-                {"wing": "wing_aya", "room": "diary", "entities": "Aya;Lumi"},
-                {"wing": "wing_aya", "room": "letters", "entities": "Lumi;Aya"},
-            ]
-        )
+        col = _fake_collection([
+            {"wing": "wing_aya", "room": "diary", "entities": "Aya;Lumi"},
+            {"wing": "wing_aya", "room": "letters", "entities": "Lumi;Aya"},
+        ])
         result = hallways_mod.compute_hallways_for_wing("wing_aya", col=col, min_count=2)
         aya_lumi = [h for h in result if {h["entity_a"], h["entity_b"]} == {"Aya", "Lumi"}]
         # Symmetry: the two drawers count as 2 co-occurrences, not 0 (no
@@ -205,12 +193,10 @@ class TestComputeHallways:
     def test_persists_to_json(self, tmp_path, monkeypatch):
         """After compute, _load_hallways() returns the new records."""
         hallway_file = _use_tmp_hallway_file(monkeypatch, tmp_path)
-        col = _fake_collection(
-            [
-                {"wing": "wing_aya", "room": "diary", "entities": "Aya;Lumi"},
-                {"wing": "wing_aya", "room": "letters", "entities": "Aya;Lumi"},
-            ]
-        )
+        col = _fake_collection([
+            {"wing": "wing_aya", "room": "diary", "entities": "Aya;Lumi"},
+            {"wing": "wing_aya", "room": "letters", "entities": "Aya;Lumi"},
+        ])
         hallways_mod.compute_hallways_for_wing("wing_aya", col=col, min_count=2)
         assert hallway_file.exists()
         loaded = hallways_mod._load_hallways()
@@ -219,13 +205,11 @@ class TestComputeHallways:
     def test_tracks_rooms_across_co_occurrences(self, tmp_path, monkeypatch):
         """A hallway records the set of rooms where its entities co-occurred."""
         _use_tmp_hallway_file(monkeypatch, tmp_path)
-        col = _fake_collection(
-            [
-                {"wing": "wing_aya", "room": "diary", "entities": "Aya;Lumi"},
-                {"wing": "wing_aya", "room": "letters", "entities": "Aya;Lumi"},
-                {"wing": "wing_aya", "room": "diary", "entities": "Aya;Lumi"},
-            ]
-        )
+        col = _fake_collection([
+            {"wing": "wing_aya", "room": "diary", "entities": "Aya;Lumi"},
+            {"wing": "wing_aya", "room": "letters", "entities": "Aya;Lumi"},
+            {"wing": "wing_aya", "room": "diary", "entities": "Aya;Lumi"},
+        ])
         result = hallways_mod.compute_hallways_for_wing("wing_aya", col=col, min_count=2)
         h = next(h for h in result if {h["entity_a"], h["entity_b"]} == {"Aya", "Lumi"})
         assert set(h["rooms"]) == {"diary", "letters"}
@@ -234,22 +218,20 @@ class TestComputeHallways:
     def test_skips_sentinel_drawers(self, tmp_path, monkeypatch):
         """Sentinels exist for file_already_mined() bookkeeping. Skip them."""
         _use_tmp_hallway_file(monkeypatch, tmp_path)
-        col = _fake_collection(
-            [
-                {
-                    "wing": "wing_aya",
-                    "room": "documents",
-                    "entities": "Aya;Lumi",
-                    "is_sentinel": True,
-                },
-                {
-                    "wing": "wing_aya",
-                    "room": "documents",
-                    "entities": "Aya;Lumi",
-                    "is_sentinel": True,
-                },
-            ]
-        )
+        col = _fake_collection([
+            {
+                "wing": "wing_aya",
+                "room": "documents",
+                "entities": "Aya;Lumi",
+                "is_sentinel": True,
+            },
+            {
+                "wing": "wing_aya",
+                "room": "documents",
+                "entities": "Aya;Lumi",
+                "is_sentinel": True,
+            },
+        ])
         result = hallways_mod.compute_hallways_for_wing("wing_aya", col=col, min_count=2)
         assert result == []
 
@@ -262,34 +244,28 @@ class TestComputeHallways:
 class TestHallwayQuery:
     def test_list_hallways_returns_all_when_no_filter(self, tmp_path, monkeypatch):
         _use_tmp_hallway_file(monkeypatch, tmp_path)
-        hallways_mod._save_hallways(
-            [
-                {"id": "h1", "wing": "wing_aya", "entity_a": "Aya", "entity_b": "Lumi"},
-                {"id": "h2", "wing": "wing_lumi", "entity_a": "Lumi", "entity_b": "Ever"},
-            ]
-        )
+        hallways_mod._save_hallways([
+            {"id": "h1", "wing": "wing_aya", "entity_a": "Aya", "entity_b": "Lumi"},
+            {"id": "h2", "wing": "wing_lumi", "entity_a": "Lumi", "entity_b": "Ever"},
+        ])
         assert len(hallways_mod.list_hallways()) == 2
 
     def test_list_hallways_filters_by_wing(self, tmp_path, monkeypatch):
         _use_tmp_hallway_file(monkeypatch, tmp_path)
-        hallways_mod._save_hallways(
-            [
-                {"id": "h1", "wing": "wing_aya", "entity_a": "Aya", "entity_b": "Lumi"},
-                {"id": "h2", "wing": "wing_lumi", "entity_a": "Lumi", "entity_b": "Ever"},
-            ]
-        )
+        hallways_mod._save_hallways([
+            {"id": "h1", "wing": "wing_aya", "entity_a": "Aya", "entity_b": "Lumi"},
+            {"id": "h2", "wing": "wing_lumi", "entity_a": "Lumi", "entity_b": "Ever"},
+        ])
         result = hallways_mod.list_hallways(wing="wing_aya")
         assert len(result) == 1
         assert result[0]["id"] == "h1"
 
     def test_delete_hallway_removes_record(self, tmp_path, monkeypatch):
         _use_tmp_hallway_file(monkeypatch, tmp_path)
-        hallways_mod._save_hallways(
-            [
-                {"id": "h1", "wing": "wing_aya", "entity_a": "Aya", "entity_b": "Lumi"},
-                {"id": "h2", "wing": "wing_aya", "entity_a": "Aya", "entity_b": "Ever"},
-            ]
-        )
+        hallways_mod._save_hallways([
+            {"id": "h1", "wing": "wing_aya", "entity_a": "Aya", "entity_b": "Lumi"},
+            {"id": "h2", "wing": "wing_aya", "entity_a": "Aya", "entity_b": "Ever"},
+        ])
         assert hallways_mod.delete_hallway("h1") is True
         remaining = hallways_mod._load_hallways()
         assert len(remaining) == 1
@@ -318,12 +294,10 @@ class TestHallwayDynamicsIntegration:
         from mempalace.dynamics import DEFAULT_STABILITY, DEFAULT_STRENGTH
 
         _use_tmp_hallway_file(monkeypatch, tmp_path)
-        col = _fake_collection(
-            [
-                {"wing": "wing_aya", "room": "diary", "entities": "Aya;Lumi"},
-                {"wing": "wing_aya", "room": "letters", "entities": "Aya;Lumi"},
-            ]
-        )
+        col = _fake_collection([
+            {"wing": "wing_aya", "room": "diary", "entities": "Aya;Lumi"},
+            {"wing": "wing_aya", "room": "letters", "entities": "Aya;Lumi"},
+        ])
         created = hallways_mod.compute_hallways_for_wing("wing_aya", col=col, min_count=2)
         assert created, "expected at least one hallway record"
         for h in created:
@@ -345,12 +319,10 @@ class TestHallwayDynamicsIntegration:
         NOT reset that strength. Otherwise every mine wipes the connection
         weights — undermining the whole L7 dynamics layer."""
         _use_tmp_hallway_file(monkeypatch, tmp_path)
-        col = _fake_collection(
-            [
-                {"wing": "wing_aya", "room": "diary", "entities": "Aya;Lumi"},
-                {"wing": "wing_aya", "room": "letters", "entities": "Aya;Lumi"},
-            ]
-        )
+        col = _fake_collection([
+            {"wing": "wing_aya", "room": "diary", "entities": "Aya;Lumi"},
+            {"wing": "wing_aya", "room": "letters", "entities": "Aya;Lumi"},
+        ])
         first_pass = hallways_mod.compute_hallways_for_wing("wing_aya", col=col, min_count=2)
         assert first_pass, "first pass must create at least one hallway"
 
@@ -382,12 +354,10 @@ class TestHallwayDynamicsIntegration:
         from mempalace.dynamics import DEFAULT_STRENGTH
 
         _use_tmp_hallway_file(monkeypatch, tmp_path)
-        col_a = _fake_collection(
-            [
-                {"wing": "wing_aya", "room": "diary", "entities": "Aya;Lumi"},
-                {"wing": "wing_aya", "room": "letters", "entities": "Aya;Lumi"},
-            ]
-        )
+        col_a = _fake_collection([
+            {"wing": "wing_aya", "room": "diary", "entities": "Aya;Lumi"},
+            {"wing": "wing_aya", "room": "letters", "entities": "Aya;Lumi"},
+        ])
         hallways_mod.compute_hallways_for_wing("wing_aya", col=col_a, min_count=2)
 
         # Bump strength on the Aya↔Lumi pair to verify it's not leaked.
@@ -397,14 +367,12 @@ class TestHallwayDynamicsIntegration:
         hallways_mod._save_hallways(stored)
 
         # Now a recompute with a different entity pair (Ever shows up).
-        col_b = _fake_collection(
-            [
-                {"wing": "wing_aya", "room": "diary", "entities": "Aya;Lumi"},
-                {"wing": "wing_aya", "room": "letters", "entities": "Aya;Lumi"},
-                {"wing": "wing_aya", "room": "diary", "entities": "Aya;Ever"},
-                {"wing": "wing_aya", "room": "letters", "entities": "Aya;Ever"},
-            ]
-        )
+        col_b = _fake_collection([
+            {"wing": "wing_aya", "room": "diary", "entities": "Aya;Lumi"},
+            {"wing": "wing_aya", "room": "letters", "entities": "Aya;Lumi"},
+            {"wing": "wing_aya", "room": "diary", "entities": "Aya;Ever"},
+            {"wing": "wing_aya", "room": "letters", "entities": "Aya;Ever"},
+        ])
         hallways_mod.compute_hallways_for_wing("wing_aya", col=col_b, min_count=2)
 
         after = hallways_mod._load_hallways()
@@ -438,34 +406,30 @@ class TestHallwayDynamicsIntegration:
 
         # Pre-populate with a record whose entities are stored in REVERSED
         # (non-sorted) order, but bumped to non-default dynamics.
-        hallways_mod._save_hallways(
-            [
-                {
-                    "id": hallways_mod._hallway_id("wing_aya", "Aya", "Lumi"),
-                    "wing": "wing_aya",
-                    "entity_a": "Lumi",  # NOT sorted — Lumi > Aya
-                    "entity_b": "Aya",
-                    "co_occurrence_count": 5,
-                    "rooms": ["diary"],
-                    "label": "...",
-                    "created_at": "2026-04-01T00:00:00+00:00",
-                    "created_by": "auto",
-                    "strength": 4.2,
-                    "stability": 1.9,
-                    "last_activated": "2026-05-01T00:00:00+00:00",
-                    "access_count": 33,
-                }
-            ]
-        )
+        hallways_mod._save_hallways([
+            {
+                "id": hallways_mod._hallway_id("wing_aya", "Aya", "Lumi"),
+                "wing": "wing_aya",
+                "entity_a": "Lumi",  # NOT sorted — Lumi > Aya
+                "entity_b": "Aya",
+                "co_occurrence_count": 5,
+                "rooms": ["diary"],
+                "label": "...",
+                "created_at": "2026-04-01T00:00:00+00:00",
+                "created_by": "auto",
+                "strength": 4.2,
+                "stability": 1.9,
+                "last_activated": "2026-05-01T00:00:00+00:00",
+                "access_count": 33,
+            }
+        ])
 
         # Recompute — should match the existing record via sorted-key lookup
         # and preserve its dynamics, not initialize defaults.
-        col = _fake_collection(
-            [
-                {"wing": "wing_aya", "room": "diary", "entities": "Aya;Lumi"},
-                {"wing": "wing_aya", "room": "letters", "entities": "Aya;Lumi"},
-            ]
-        )
+        col = _fake_collection([
+            {"wing": "wing_aya", "room": "diary", "entities": "Aya;Lumi"},
+            {"wing": "wing_aya", "room": "letters", "entities": "Aya;Lumi"},
+        ])
         hallways_mod.compute_hallways_for_wing("wing_aya", col=col, min_count=2)
 
         after = hallways_mod._load_hallways()

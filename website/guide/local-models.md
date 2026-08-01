@@ -42,10 +42,7 @@ results = search_memories(
 )
 
 # Format results for your model's context
-context = "\n".join(
-    f"[{r['wing']}/{r['room']}] {r['text']}"
-    for r in results["results"]
-)
+context = "\n".join(f"[{r['wing']}/{r['room']}] {r['text']}" for r in results["results"])
 
 # Inject into your local model's prompt
 prompt = f"Context from memory:\n{context}\n\nUser: What did we decide about auth?"

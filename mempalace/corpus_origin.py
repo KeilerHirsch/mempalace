@@ -376,8 +376,9 @@ def detect_origin_llm(samples: list[str], provider) -> CorpusOriginResult:
     and an LLMProvider (mempalace.llm_client.LLMProvider). Returns the
     same CorpusOriginResult shape as the heuristic.
 
-    Falls back conservatively (default-stance ai=True, low confidence)
-    on any LLM error or malformed response — never raises.
+    Never raises. On any failure (provider/transport error, or a response
+    that isn't valid JSON) returns an honest unknown — likely_ai_dialogue=
+    False, confidence=0.0 — never a fabricated positive verdict.
     """
     # Build the user prompt: concise excerpts, capped so we stay cheap
     max_excerpt_chars = 800
@@ -389,21 +390,34 @@ def detect_origin_llm(samples: list[str], provider) -> CorpusOriginResult:
     try:
         resp = provider.classify(system=_SYSTEM_PROMPT, user=user_prompt, json_mode=True)
         raw = getattr(resp, "text", "") or ""
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - provider outage is "unknown", never a positive verdict
+        # A provider error is NOT evidence of AI-dialogue. The old fallback
+        # returned likely_ai_dialogue=True, confidence=0.3 — inventing a
+        # positive verdict out of an outage. Return an honest "unknown":
+        # no positive claim (False), zero confidence, and the error in the
+        # evidence so a caller can tell "couldn't check" from "checked, not AI".
+        import logging
+
+        logging.getLogger("mempalace_mcp").warning(
+            "corpus-origin LLM classification failed; returning unknown (confidence 0.0)",
+            exc_info=True,
+        )
         return CorpusOriginResult(
-            likely_ai_dialogue=True,
-            confidence=0.3,
+            likely_ai_dialogue=False,
+            confidence=0.0,
             primary_platform=None,
-            evidence=[f"LLM provider error (fallback to default stance): {e}"],
+            evidence=[f"LLM provider error — classification unknown, not determined: {e}"],
         )
 
     parsed = _extract_json(raw)
     if not parsed or not isinstance(parsed, dict):
+        # A malformed response is NOT evidence of AI-dialogue either — same
+        # honest-unknown treatment as the provider-error branch above.
         return CorpusOriginResult(
-            likely_ai_dialogue=True,
-            confidence=0.3,
+            likely_ai_dialogue=False,
+            confidence=0.0,
             primary_platform=None,
-            evidence=["LLM response was not valid JSON (fallback to default stance)"],
+            evidence=["LLM response was not valid JSON — classification unknown, not determined"],
         )
 
     # Pull fields defensively. If the LLM leaked the user_name into

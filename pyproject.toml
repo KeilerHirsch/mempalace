@@ -165,9 +165,13 @@ packages = ["mempalace"]
 line-length = 100
 target-version = "py39"
 extend-exclude = ["benchmarks"]
+# PLW1514 (unspecified-encoding) is a preview rule in this ruff version;
+# CI runs `ruff check .` with no --preview flag, so preview mode must be
+# enabled here or the rule silently has no effect despite being selected.
+preview = true
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "C901"]
+select = ["E", "F", "W", "C901", "BLE", "PLW1514"]
 ignore = ["E501"]
 
 [tool.ruff.lint.mccabe]

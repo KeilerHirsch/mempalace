@@ -591,8 +591,8 @@ def test_try_lock_start_file_returns_false_when_already_locked(tmp_path):
     provides (``msvcrt`` on Windows, ``fcntl`` on POSIX) directly.
     """
     path = tmp_path / "start.lock"
-    f1 = open(path, "w")
-    f2 = open(path, "w")
+    f1 = open(path, "w", encoding="utf-8")
+    f2 = open(path, "w", encoding="utf-8")
     try:
         assert daemon._try_lock_start_file(f1) is True
         assert daemon._try_lock_start_file(f2) is False
@@ -604,8 +604,8 @@ def test_try_lock_start_file_returns_false_when_already_locked(tmp_path):
 def test_wait_lock_start_file_unblocks_after_release(tmp_path):
     """The blocking spawn-mutex wait must actually wake once the holder lets go."""
     path = tmp_path / "start.lock"
-    f1 = open(path, "w")
-    f2 = open(path, "w")
+    f1 = open(path, "w", encoding="utf-8")
+    f2 = open(path, "w", encoding="utf-8")
     assert daemon._try_lock_start_file(f1) is True
     assert daemon._try_lock_start_file(f2) is False
 
@@ -683,7 +683,7 @@ def test_wait_lock_start_file_translates_posix_flock_error(tmp_path, monkeypatch
             raise OSError(4, "Interrupted system call")
 
     monkeypatch.setattr(daemon, "_fcntl", _FakeFcntl)
-    fh = open(tmp_path / "start.lock", "w")
+    fh = open(tmp_path / "start.lock", "w", encoding="utf-8")
     try:
         with pytest.raises(daemon.DaemonError):
             daemon._wait_lock_start_file(fh)
@@ -705,8 +705,8 @@ def test_wait_lock_start_file_raises_daemon_error_on_timeout(tmp_path, monkeypat
     """
     monkeypatch.setattr(daemon, "_LOCK_WAIT_TIMEOUT", 0.2)
     path = tmp_path / "start.lock"
-    holder = open(path, "w")
-    waiter = open(path, "w")
+    holder = open(path, "w", encoding="utf-8")
+    waiter = open(path, "w", encoding="utf-8")
     try:
         assert daemon._try_lock_start_file(holder) is True
         with pytest.raises(daemon.DaemonError):
@@ -740,7 +740,7 @@ def test_start_daemon_lock_wait_timeout_is_daemon_error_and_closes_handle(tmp_pa
 
     sd = daemon.state_dir(str(palace))
     sd.mkdir(parents=True, exist_ok=True)
-    holder = open(sd / "start.lock", "w")
+    holder = open(sd / "start.lock", "w", encoding="utf-8")
     try:
         # Someone else holds the spawn mutex and never lets go.
         assert real_try_lock(holder) is True
@@ -855,9 +855,13 @@ def test_start_daemon_serializes_concurrent_spawners(tmp_path, monkeypatch):
 def test_print_job_result_replays_stdout_stderr_and_returns_exit_code(capsys):
     from mempalace import service
 
-    code = service.print_job_result(
-        {"success": False, "error": "boom", "stdout": "out\n", "stderr": "err\n", "exit_code": 3}
-    )
+    code = service.print_job_result({
+        "success": False,
+        "error": "boom",
+        "stdout": "out\n",
+        "stderr": "err\n",
+        "exit_code": 3,
+    })
     assert code == 3
     captured = capsys.readouterr()
     assert "out" in captured.out
@@ -940,9 +944,12 @@ def test_run_diary_write_forwards_args_and_sets_exit_code(monkeypatch):
         return {"success": True}
 
     monkeypatch.setattr(mcp, "tool_diary_write", fake_diary)
-    out = service.run_diary_write(
-        {"agent_name": "alice", "entry": "hello", "topic": "t", "wing": "w"}
-    )
+    out = service.run_diary_write({
+        "agent_name": "alice",
+        "entry": "hello",
+        "topic": "t",
+        "wing": "w",
+    })
     assert out["success"] is True
     assert out["exit_code"] == 0
     assert captured == {"agent_name": "alice", "entry": "hello", "topic": "t", "wing": "w"}

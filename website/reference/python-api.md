@@ -11,8 +11,8 @@ from mempalace.searcher import search_memories
 
 results = search_memories(
     query="why did we switch to GraphQL",
-    wing="myapp",          # optional filter
-    room="architecture",   # optional filter
+    wing="myapp",  # optional filter
+    room="architecture",  # optional filter
     n_results=5,
 )
 
@@ -114,8 +114,8 @@ stats = dialect.compression_stats(text, compressed)
 from mempalace.config import MempalaceConfig
 
 config = MempalaceConfig()
-print(config.palace_path)       # ~/.mempalace/palace
-print(config.collection_name)   # mempalace_drawers
+print(config.palace_path)  # ~/.mempalace/palace
+print(config.collection_name)  # mempalace_drawers
 ```
 
 For detailed parameter documentation, see [API Reference](/reference/api-reference).

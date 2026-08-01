@@ -175,7 +175,7 @@ def _metric_for_collection(col) -> str:
     """
     try:
         metric = getattr(col, "distance_metric", "cosine")
-    except Exception:
+    except Exception:  # noqa: BLE001 - falls back to documented default "cosine"
         return "cosine"
     metric = str(metric or "cosine").lower()
     return metric if metric in ("cosine", "l2", "ip") else "cosine"
@@ -335,7 +335,10 @@ def _expand_with_neighbors(drawers_col, matched_doc: str, matched_meta: dict, ra
             where={"$and": neighbor_clauses},
             include=["documents", "metadatas"],
         )
-    except Exception:
+    except Exception:  # noqa: BLE001 - neighbor fetch failed, degraded single-chunk return
+        # Neighbor fetch failed: return the matched chunk alone with
+        # total_drawers=None instead of the stitched context.
+        logger.warning("neighbor fetch failed; returning single matched chunk", exc_info=True)
         return {"text": matched_doc, "drawer_index": chunk_idx, "total_drawers": None}
 
     indexed_docs = []
@@ -361,7 +364,7 @@ def _expand_with_neighbors(drawers_col, matched_doc: str, matched_meta: dict, ra
             include=["metadatas"],
         )
         total_drawers = len(all_meta.ids) if all_meta.ids else None
-    except Exception:
+    except Exception:  # noqa: BLE001 - display-only count, stays None (already "unknown" sentinel)
         logger.debug("total_drawers lookup failed for %s", src, exc_info=True)
 
     return {
@@ -388,7 +391,7 @@ def _warn_if_legacy_metric(col) -> None:
     """
     try:
         meta = getattr(col, "metadata", None)
-    except Exception:
+    except Exception:  # noqa: BLE001 - best-effort notice printer, failure just skips the notice
         return
     if not isinstance(meta, dict):
         return
@@ -684,28 +687,26 @@ def _bm25_only_via_sqlite(
         if source_file and meta.get("source_file") != source_file:
             continue
         full_source = meta.get("source_file", "") or ""
-        candidates.append(
-            {
-                "text": d["text"],
-                "wing": meta.get("wing", "unknown"),
-                "room": meta.get("room", "unknown"),
-                "source_file": Path(full_source).name if full_source else "?",
-                "source_path": full_source,
-                "created_at": meta.get("filed_at", "unknown"),
-                "authored_at": meta.get("authored_at", meta.get("filed_at", "unknown")),
-                # No vector distance available in BM25-only mode.
-                "similarity": None,
-                "distance": None,
-                "matched_via": "bm25_sqlite",
-                # Internal: full path + chunk_index let callers (notably
-                # candidate_strategy="union") dedupe at chunk granularity
-                # rather than basename — two files in different directories
-                # may share a basename, and one source_file is split across
-                # multiple chunks. Stripped before this helper returns.
-                "_source_file_full": full_source,
-                "_chunk_index": meta.get("chunk_index"),
-            }
-        )
+        candidates.append({
+            "text": d["text"],
+            "wing": meta.get("wing", "unknown"),
+            "room": meta.get("room", "unknown"),
+            "source_file": Path(full_source).name if full_source else "?",
+            "source_path": full_source,
+            "created_at": meta.get("filed_at", "unknown"),
+            "authored_at": meta.get("authored_at", meta.get("filed_at", "unknown")),
+            # No vector distance available in BM25-only mode.
+            "similarity": None,
+            "distance": None,
+            "matched_via": "bm25_sqlite",
+            # Internal: full path + chunk_index let callers (notably
+            # candidate_strategy="union") dedupe at chunk granularity
+            # rather than basename — two files in different directories
+            # may share a basename, and one source_file is split across
+            # multiple chunks. Stripped before this helper returns.
+            "_source_file_full": full_source,
+            "_chunk_index": meta.get("chunk_index"),
+        })
 
     # Local BM25 over the candidate set.
     docs = [c["text"] for c in candidates]
@@ -779,7 +780,7 @@ def _merge_bm25_union_candidates(
         )
     except UnsupportedCapabilityError:
         raise
-    except Exception:
+    except Exception:  # noqa: BLE001 - union strategy enhancement, degrades to vector-only hits
         logger.debug("candidate_strategy=union: lexical fetch failed", exc_info=True)
         return
 
@@ -787,25 +788,23 @@ def _merge_bm25_union_candidates(
     for hit in lexical.hits:
         meta = hit.metadata or {}
         full_source = meta.get("source_file", "") or ""
-        bm25_extra.append(
-            {
-                "text": hit.document or "",
-                "wing": meta.get("wing", "unknown"),
-                "room": meta.get("room", "unknown"),
-                "source_file": Path(full_source).name if full_source else "?",
-                "source_path": full_source,
-                "created_at": meta.get("filed_at", "unknown"),
-                "authored_at": meta.get("authored_at", meta.get("filed_at", "unknown")),
-                "similarity": None,
-                "distance": None,
-                "effective_distance": None,
-                "closet_boost": 0.0,
-                "matched_via": "bm25_backend",
-                "bm25_score": round(float(hit.score), 3),
-                "_source_file_full": full_source,
-                "_chunk_index": meta.get("chunk_index"),
-            }
-        )
+        bm25_extra.append({
+            "text": hit.document or "",
+            "wing": meta.get("wing", "unknown"),
+            "room": meta.get("room", "unknown"),
+            "source_file": Path(full_source).name if full_source else "?",
+            "source_path": full_source,
+            "created_at": meta.get("filed_at", "unknown"),
+            "authored_at": meta.get("authored_at", meta.get("filed_at", "unknown")),
+            "similarity": None,
+            "distance": None,
+            "effective_distance": None,
+            "closet_boost": 0.0,
+            "matched_via": "bm25_backend",
+            "bm25_score": round(float(hit.score), 3),
+            "_source_file_full": full_source,
+            "_chunk_index": meta.get("chunk_index"),
+        })
 
     def _dedup_key(entry: dict):
         full = entry.get("_source_file_full")
@@ -992,10 +991,16 @@ def _open_search_collection(palace_path: str, collection_name: str):
             "hint": "Check the selected backend configuration and availability.",
         }
     except Exception as e:
-        logger.error("No palace found at %s: %s", palace_path, e)
+        # Everything above this is a known, environmental condition (missing
+        # palace, unknown backend, backend outage). Anything that falls
+        # through to here is unexpected — logging it with the real palace-
+        # not-found copy would misdirect debugging toward "run mempalace
+        # init" when the actual cause could be a defect in this code path.
+        logger.error("Unexpected error opening palace at %s: %s", palace_path, e, exc_info=True)
         return None, {
-            "error": "No palace found",
-            "hint": "Run: mempalace init <dir> && mempalace mine <dir>",
+            "error": "Unexpected error opening palace",
+            "details": str(e),
+            "hint": "This is not a known/expected failure mode — check the server logs.",
         }
 
 
@@ -1136,7 +1141,7 @@ def search_memories(
         drawer_results = _query_drawers_with_filter_fallback(
             drawers_col, dkwargs, query, n_results, wing, room, source_file
         )
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - wraps whole drawer query, converted to error dict
         return {"error": f"Search error: {e}"}
 
     # Gather closet hits (best-per-source) to build a boost lookup.
@@ -1162,7 +1167,7 @@ def search_memories(
             source = cmeta.get("source_file", "")
             if source and source not in closet_boost_by_source:
                 closet_boost_by_source[source] = (rank, cdist, cdoc[:200])
-    except Exception:
+    except Exception:  # noqa: BLE001 - ranking signal only (never a gate), degrades gracefully
         # No closets yet — hybrid degrades to pure drawer search.
         logger.debug("Closet collection unavailable; using drawer-only search", exc_info=True)
 
@@ -1252,7 +1257,7 @@ def search_memories(
                 where=_scoped_source_filter(full_source, h.get("_parent_drawer_id")),
                 include=["documents", "metadatas"],
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 - grep-enrichment fetch, loop continues to next hit
             logger.debug("Neighbor fetch failed for %s", full_source, exc_info=True)
             continue
         docs = source_drawers.documents

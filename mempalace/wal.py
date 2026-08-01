@@ -24,9 +24,15 @@ _WAL_FILE = Path(os.path.expanduser("~/.mempalace/wal")) / "write_log.jsonl"
 _WAL_INITIALIZED_DIR = None
 
 # Keys whose values should be redacted in WAL entries to avoid logging sensitive content
-_WAL_REDACT_KEYS = frozenset(
-    {"content", "content_preview", "document", "entry", "entry_preview", "query", "text"}
-)
+_WAL_REDACT_KEYS = frozenset({
+    "content",
+    "content_preview",
+    "document",
+    "entry",
+    "entry_preview",
+    "query",
+    "text",
+})
 
 
 def _ensure_wal() -> None:
@@ -93,5 +99,5 @@ def _wal_log(operation: str, params: dict, result: dict = None):
         fd = os.open(str(_WAL_FILE), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
         with os.fdopen(fd, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, default=str) + "\n")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - documented: WAL failure is logged and non-fatal
         logger.error(f"WAL write failed: {e}")

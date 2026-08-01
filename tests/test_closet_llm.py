@@ -120,24 +120,20 @@ class TestCallLLM:
             captured["url"] = req.full_url
             captured["headers"] = dict(req.header_items())
             captured["body"] = json.loads(req.data.decode("utf-8"))
-            return _FakeResp(
-                {
-                    "choices": [
-                        {
-                            "message": {
-                                "content": json.dumps(
-                                    {
-                                        "topics": ["postgres"],
-                                        "quotes": ["[Igor] migrate now"],
-                                        "summary": "db migration",
-                                    }
-                                )
-                            }
+            return _FakeResp({
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps({
+                                "topics": ["postgres"],
+                                "quotes": ["[Igor] migrate now"],
+                                "summary": "db migration",
+                            })
                         }
-                    ],
-                    "usage": {"prompt_tokens": 42, "completion_tokens": 17},
-                }
-            )
+                    }
+                ],
+                "usage": {"prompt_tokens": 42, "completion_tokens": 17},
+            })
 
         with patch("urllib.request.urlopen", side_effect=fake_urlopen):
             parsed, usage = _call_llm(cfg, "/tmp/test.md", "w", "r", "content body")
@@ -157,12 +153,10 @@ class TestCallLLM:
 
         def fake_urlopen(req, timeout=None):
             captured_headers.update({k.lower(): v for k, v in req.header_items()})
-            return _FakeResp(
-                {
-                    "choices": [{"message": {"content": '{"topics":[],"quotes":[],"summary":""}'}}],
-                    "usage": {"prompt_tokens": 0, "completion_tokens": 0},
-                }
-            )
+            return _FakeResp({
+                "choices": [{"message": {"content": '{"topics":[],"quotes":[],"summary":""}'}}],
+                "usage": {"prompt_tokens": 0, "completion_tokens": 0},
+            })
 
         with patch("urllib.request.urlopen", side_effect=fake_urlopen):
             _call_llm(cfg, "/tmp/x", "w", "r", "c")
@@ -174,12 +168,10 @@ class TestCallLLM:
         fenced = '```json\n{"topics":["t1"],"quotes":[],"summary":""}\n```'
 
         def fake_urlopen(req, timeout=None):
-            return _FakeResp(
-                {
-                    "choices": [{"message": {"content": fenced}}],
-                    "usage": {"prompt_tokens": 1, "completion_tokens": 1},
-                }
-            )
+            return _FakeResp({
+                "choices": [{"message": {"content": fenced}}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+            })
 
         with patch("urllib.request.urlopen", side_effect=fake_urlopen):
             parsed, _ = _call_llm(cfg, "/tmp/x", "w", "r", "c")
@@ -189,12 +181,10 @@ class TestCallLLM:
         cfg = self._make_cfg()
 
         def fake_urlopen(req, timeout=None):
-            return _FakeResp(
-                {
-                    "choices": [{"message": {"content": "not json at all"}}],
-                    "usage": {"prompt_tokens": 1, "completion_tokens": 1},
-                }
-            )
+            return _FakeResp({
+                "choices": [{"message": {"content": "not json at all"}}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+            })
 
         with (
             patch("urllib.request.urlopen", side_effect=fake_urlopen),
@@ -209,12 +199,10 @@ class TestCallLLM:
 
         def fake_urlopen(req, timeout=None):
             call_count["n"] += 1
-            return _FakeResp(
-                {
-                    "choices": [{"message": {"content": "not json at all"}}],
-                    "usage": {"prompt_tokens": 1, "completion_tokens": 1},
-                }
-            )
+            return _FakeResp({
+                "choices": [{"message": {"content": "not json at all"}}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+            })
 
         with (
             patch("urllib.request.urlopen", side_effect=fake_urlopen),
@@ -223,6 +211,46 @@ class TestCallLLM:
             parsed, _ = _call_llm(cfg, "/tmp/x", "w", "r", "c")
         assert parsed is None
         assert call_count["n"] == 3
+
+    def test_generic_error_is_logged_not_swallowed_silently(self, caplog):
+        """Regression: the bare ``except Exception as e`` fallback returned
+        (None, None) with zero trace of ``e`` — a KeyError from a malformed
+        provider response looked identical to a clean network timeout.
+        Any non-rate, non-JSON, non-HTTP exception must be logged so the
+        failure reason survives past this function's return."""
+        import logging
+
+        cfg = self._make_cfg()
+
+        def fake_urlopen(req, timeout=None):
+            raise KeyError("choices")
+
+        with caplog.at_level(logging.WARNING, logger="mempalace_mcp"):
+            with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+                parsed, usage = _call_llm(cfg, "/tmp/x", "w", "r", "c")
+
+        assert parsed is None
+        assert usage is None
+        assert any("KeyError" in r.message or "choices" in r.message for r in caplog.records), (
+            "generic exception must be logged with its cause, not swallowed"
+        )
+
+    def test_generic_error_does_not_retry(self):
+        """A non-rate, non-HTTP, non-JSON error is not transient — retrying
+        it 3x with backoff just delays the honest failure for no benefit."""
+        cfg = self._make_cfg()
+        call_count = {"n": 0}
+
+        def fake_urlopen(req, timeout=None):
+            call_count["n"] += 1
+            raise KeyError("choices")
+
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            parsed, usage = _call_llm(cfg, "/tmp/x", "w", "r", "c")
+
+        assert parsed is None
+        assert usage is None
+        assert call_count["n"] == 1
 
 
 # ── regenerate_closets error paths ───────────────────────────────────────
@@ -283,24 +311,20 @@ class TestRegenerateClosets:
         cfg = LLMConfig(endpoint="http://local/v1", model="llama3:8b")
 
         def fake_urlopen(req, timeout=None):
-            return _FakeResp(
-                {
-                    "choices": [
-                        {
-                            "message": {
-                                "content": json.dumps(
-                                    {
-                                        "topics": ["jwt auth", "session expiry"],
-                                        "quotes": [],
-                                        "summary": "auth refactor",
-                                    }
-                                )
-                            }
+            return _FakeResp({
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps({
+                                "topics": ["jwt auth", "session expiry"],
+                                "quotes": [],
+                                "summary": "auth refactor",
+                            })
                         }
-                    ],
-                    "usage": {"prompt_tokens": 10, "completion_tokens": 5},
-                }
-            )
+                    }
+                ],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+            })
 
         with patch("urllib.request.urlopen", side_effect=fake_urlopen):
             result = regenerate_closets(palace, cfg=cfg)
@@ -376,14 +400,10 @@ class TestRegenerateClosets:
         fake_closets = FakeClosetsCol()
 
         def fake_urlopen(req, timeout=None):
-            return _FakeResp(
-                {
-                    "choices": [
-                        {"message": {"content": '{"topics":["t1"],"quotes":[],"summary":""}'}}
-                    ],
-                    "usage": {"prompt_tokens": 1, "completion_tokens": 1},
-                }
-            )
+            return _FakeResp({
+                "choices": [{"message": {"content": '{"topics":["t1"],"quotes":[],"summary":""}'}}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+            })
 
         cfg = LLMConfig(endpoint="http://local/v1", model="m")
 
@@ -517,14 +537,10 @@ class TestRegenerateClosets:
         cfg = LLMConfig(endpoint="http://local/v1", model="m")
 
         def fake_urlopen(req, timeout=None):
-            return _FakeResp(
-                {
-                    "choices": [
-                        {"message": {"content": '{"topics":["t1"],"quotes":[],"summary":""}'}}
-                    ],
-                    "usage": {"prompt_tokens": 1, "completion_tokens": 1},
-                }
-            )
+            return _FakeResp({
+                "choices": [{"message": {"content": '{"topics":["t1"],"quotes":[],"summary":""}'}}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+            })
 
         with patch("urllib.request.urlopen", side_effect=fake_urlopen):
             regenerate_closets(palace, cfg=cfg)

@@ -46,7 +46,7 @@ def _get_palace_path():
         from .config import MempalaceConfig
 
         return MempalaceConfig().palace_path
-    except Exception:
+    except Exception:  # noqa: BLE001 - config import failure falls back to conventional default
         return os.path.join(os.path.expanduser("~"), ".mempalace", "palace")
 
 
@@ -119,7 +119,14 @@ def dedup_source_group(col, drawer_ids, threshold=DEFAULT_THRESHOLD, dry_run=Tru
                 to_delete.append(did)
             else:
                 kept.append((did, doc))
-        except Exception:
+        except Exception:  # noqa: BLE001 - dup-check failed, keep drawer (fail-safe)
+            # Similarity dup-check failed for this drawer: keep it (fail-safe,
+            # never delete on an unclear result). Persistent breakage is now visible.
+            import logging
+
+            logging.getLogger("mempalace_mcp").warning(
+                "dedup similarity check failed for %s; keeping drawer", did, exc_info=True
+            )
             kept.append((did, doc))
 
     if to_delete and not dry_run:

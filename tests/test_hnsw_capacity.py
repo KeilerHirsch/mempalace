@@ -17,6 +17,9 @@ import pytest
 
 from mempalace.backends.chroma import (
     _hnsw_element_count,
+    _int64_array,
+    _load_spark_guard,
+    _spark_guard_check_consistency,
     _vector_segment_id,
     hnsw_capacity_status,
 )
@@ -34,7 +37,8 @@ def _seed_chroma_db(
     sqlite_count: int,
     segment_id: str,
     sync_threshold: int | None = None,
-) -> None:
+    embeddings_under_metadata: bool = False,
+) -> str:
     """Create a minimal chroma.sqlite3 with one collection + VECTOR segment.
 
     Mirrors the columns the probe queries: ``segments``, ``collections``,
@@ -46,6 +50,18 @@ def _seed_chroma_db(
     When ``sync_threshold`` is supplied, an ``hnsw:sync_threshold`` row
     is added to ``collection_metadata`` so the divergence floor scales
     accordingly. Omit to model an older palace that pre-dates PR #1191.
+
+    ``embeddings_under_metadata`` (default ``False``, preserving every
+    existing caller's behavior): when ``True``, ``embeddings.segment_id``
+    points at the METADATA segment instead of the VECTOR one. Measured
+    directly against a live chromadb 1.5.x palace: ``embeddings.segment_id``
+    actually references the METADATA segment there, not VECTOR — this
+    default-``False`` fixture predates that finding and happens to still
+    work for the count-only checks (:func:`_sqlite_embedding_count` joins
+    on collection, not segment scope), but the consistency-guard tests
+    need the real METADATA association to exercise
+    ``_sqlite_embedding_ids`` correctly. Returns the METADATA segment id
+    either way, so callers needing it don't have to hardcode ``"seg-meta"``.
     """
     db_path = os.path.join(palace, "chroma.sqlite3")
     conn = sqlite3.connect(db_path)
@@ -107,15 +123,17 @@ def _seed_chroma_db(
             "INSERT INTO segments (id, collection, scope) VALUES (?, ?, 'METADATA')",
             (meta_seg, col_id),
         )
+        embeddings_segment_id = meta_seg if embeddings_under_metadata else segment_id
         for i in range(sqlite_count):
             conn.execute(
                 """INSERT INTO embeddings (id, segment_id, embedding_id, seq_id)
                    VALUES (?, ?, ?, ?)""",
-                (i + 1, segment_id, f"d-{i}", b"\x00\x00\x00\x00\x00\x00\x00\x01"),
+                (i + 1, embeddings_segment_id, f"d-{i}", b"\x00\x00\x00\x00\x00\x00\x00\x01"),
             )
         conn.commit()
     finally:
         conn.close()
+    return meta_seg
 
 
 def _write_pickle(palace: str, segment_id: str, hnsw_count: int) -> None:
@@ -695,3 +713,209 @@ def test_capacity_status_ok_with_stale_metadata_under_explicit_threshold(tmp_pat
     assert info["threshold"] == 4
     assert info["status"] == "ok"
     assert info["diverged"] is False
+
+
+# ── _int64_array ──────────────────────────────────────────────────────
+#
+# _int64_array is a line-for-line port of the SPARK guard PoC fixture's
+# _arr() helper — same range-validation fix an earlier ECC review found
+# missing in the PoC (ctypes silently wraps two's-complement instead of
+# raising on out-of-range input). These tests exercise the port directly,
+# independent of the fixture's own tests.
+
+
+def test_int64_array_empty_returns_null_pointer():
+    buf, ptr, n = _int64_array([])
+    assert buf is None
+    assert n == 0
+
+
+def test_int64_array_dedupes_and_sorts():
+    buf, ptr, n = _int64_array([5, 1, 5, 3, 1])
+    assert n == 3
+    assert buf is not None
+    assert list(buf) == [1, 3, 5]
+
+
+def test_int64_array_accepts_boundary_values():
+    int64_min = -(2**63)
+    int64_max = 2**63 - 1
+    buf, ptr, n = _int64_array([int64_min, int64_max])
+    assert n == 2
+    assert buf is not None
+    assert list(buf) == [int64_min, int64_max]
+
+
+def test_int64_array_rejects_positive_overflow():
+    with pytest.raises(ValueError):
+        _int64_array([2**63])
+
+
+def test_int64_array_rejects_negative_underflow():
+    with pytest.raises(ValueError):
+        _int64_array([-(2**63) - 1])
+
+
+# ── _spark_guard_check_consistency ───────────────────────────────────
+#
+# Skipped automatically when the SPARK guard DLL isn't loadable for this
+# environment (non-Windows, the PoC not compiled, OR — the actual reason
+# under this repo's test suite — conftest.py deliberately redirects HOME
+# to an isolated temp dir before any mempalace import, so the guard's
+# ~/.alire GNAT-runtime lookup can't find the real toolchain even though
+# libguard.dll itself exists on disk). Root-caused directly: confirmed
+# via DEBUG logging that ctypes.CDLL raises FileNotFoundError only under
+# pytest, and that os.path.expanduser("~") resolves to conftest.py's
+# _session_tmp there, not the real user profile. This is intentional
+# test isolation, not a production bug (a real MCP server process has a
+# correct HOME) — the skip is the honest outcome, not a workaround.
+# _load_spark_guard() returning None is itself a legitimate, tested
+# fallback path (see test_spark_guard_missing_dll_returns_none below).
+
+_GUARD_UNAVAILABLE = _load_spark_guard() is None
+_skip_no_guard = pytest.mark.skipif(
+    _GUARD_UNAVAILABLE,
+    reason=(
+        "SPARK guard DLL not loadable in this environment (often: HOME is "
+        "redirected by conftest.py's test isolation, so ~/.alire's GNAT "
+        "runtime can't be found — not a missing-DLL problem)"
+    ),
+)
+
+
+@_skip_no_guard
+def test_spark_guard_matching_sets_are_consistent():
+    ids = {"d-1", "d-2", "d-3"}
+    result = _spark_guard_check_consistency(ids, set(ids))
+    assert result is not None
+    assert result["ok"] is True
+    assert result["read_permitted"] is True
+    assert result["missing_ids"]["in_sqlite_not_hnsw_count"] == 0
+    assert result["missing_ids"]["in_hnsw_not_sqlite_count"] == 0
+
+
+@_skip_no_guard
+def test_spark_guard_sqlite_only_extra_id_is_divergent():
+    sqlite_ids = {"d-1", "d-2", "d-3"}
+    hnsw_ids = {"d-1", "d-2"}
+    result = _spark_guard_check_consistency(sqlite_ids, hnsw_ids)
+    assert result is not None
+    assert result["ok"] is False
+    assert result["read_permitted"] is False
+    assert result["missing_ids"]["in_sqlite_not_hnsw"] == ["d-3"]
+    assert result["missing_ids"]["in_hnsw_not_sqlite_count"] == 0
+
+
+@_skip_no_guard
+def test_spark_guard_hnsw_only_extra_id_is_divergent():
+    sqlite_ids = {"d-1", "d-2"}
+    hnsw_ids = {"d-1", "d-2", "d-3"}
+    result = _spark_guard_check_consistency(sqlite_ids, hnsw_ids)
+    assert result is not None
+    assert result["ok"] is False
+    assert result["missing_ids"]["in_hnsw_not_sqlite"] == ["d-3"]
+    assert result["missing_ids"]["in_sqlite_not_hnsw_count"] == 0
+
+
+@_skip_no_guard
+def test_spark_guard_empty_sets_are_consistent():
+    result = _spark_guard_check_consistency(set(), set())
+    assert result is not None
+    assert result["ok"] is True
+    assert result["read_permitted"] is True
+
+
+@_skip_no_guard
+def test_spark_guard_non_ascii_embedding_ids():
+    """embedding_id strings are not guaranteed ASCII (e.g. non-Latin wing/room names)."""
+    ids = {"drawer_wissensarchiv_general_äöüß_01", "drawer_genealogie_general_попов_02"}
+    result = _spark_guard_check_consistency(ids, set(ids))
+    assert result is not None
+    assert result["ok"] is True
+
+
+@_skip_no_guard
+def test_spark_guard_same_count_different_ids_is_divergent():
+    """Equal cardinality with swapped members must NOT read as consistent.
+
+    This is the exact case a naive count-only comparison would miss —
+    the reason the guard compares set membership, not just len().
+    """
+    sqlite_ids = {"d-1", "d-2", "d-3"}
+    hnsw_ids = {"d-1", "d-2", "d-4"}
+    result = _spark_guard_check_consistency(sqlite_ids, hnsw_ids)
+    assert result is not None
+    assert result["ok"] is False
+    assert len(sqlite_ids) == len(hnsw_ids)  # same count, by construction of this test
+
+
+def test_spark_guard_missing_dll_returns_none(monkeypatch):
+    """When the guard DLL isn't available, the probe returns None (fallback), never raises."""
+    monkeypatch.setattr("mempalace.backends.chroma._load_spark_guard", lambda: None)
+    result = _spark_guard_check_consistency({"d-1"}, {"d-1"})
+    assert result is None
+
+
+# ── hnsw_capacity_status: consistency integration ────────────────────
+
+
+def test_capacity_status_consistency_default_is_none_and_fast(tmp_path):
+    """include_consistency_check defaults to False: hnsw_capacity_status is
+    called on every MCP server boot (mcp_server._refresh_vector_disabled_flag)
+    and must stay fast there — measured at ~75s for the consistency check on
+    a real 323k-element palace, vs sub-second for the count-only check. The
+    guard must never run unless a caller explicitly opts in."""
+    seg = "seg-consistency-default-off"
+    _seed_chroma_db(str(tmp_path), sqlite_count=50, segment_id=seg, embeddings_under_metadata=True)
+    _write_pickle(str(tmp_path), seg, hnsw_count=50)
+    info = hnsw_capacity_status(str(tmp_path), COLLECTION)
+    assert info["consistency"] is None
+
+
+def test_capacity_status_consistency_populated_when_ids_match(tmp_path):
+    seg = "seg-consistency-ok"
+    _seed_chroma_db(str(tmp_path), sqlite_count=50, segment_id=seg, embeddings_under_metadata=True)
+    _write_pickle(str(tmp_path), seg, hnsw_count=50)
+    info = hnsw_capacity_status(str(tmp_path), COLLECTION, include_consistency_check=True)
+    if info["consistency"] is None:
+        pytest.skip("SPARK guard DLL not built in this environment")
+    assert info["consistency"]["ok"] is True
+    assert info["consistency"]["missing_ids"]["in_sqlite_not_hnsw_count"] == 0
+
+
+def test_capacity_status_consistency_none_when_embeddings_not_under_metadata(tmp_path):
+    """Old-shape fixture (embeddings under VECTOR, matching every other existing
+    test in this file) yields an empty sqlite id set for the METADATA segment,
+    so the guard's id sets never populate — consistency stays None rather than
+    reporting a false "fully divergent" verdict on a fixture gap, not real data."""
+    seg = "seg-consistency-none"
+    _seed_chroma_db(str(tmp_path), sqlite_count=50, segment_id=seg)
+    _write_pickle(str(tmp_path), seg, hnsw_count=50)
+    info = hnsw_capacity_status(str(tmp_path), COLLECTION, include_consistency_check=True)
+    assert info["consistency"] is None
+
+
+def test_capacity_status_survives_consistency_check_raising(tmp_path, monkeypatch):
+    """hnsw_capacity_status must never raise, even if the consistency check does.
+
+    _spark_guard_check_consistency's own except-Exception wrapper already
+    guarantees it never raises in practice (see the tests above) — this
+    test probes past that contract via monkeypatch to confirm the OUTER
+    hnsw_capacity_status call is itself defense-in-depth: the call site
+    sits inside hnsw_capacity_status's existing top-level try/except (the
+    same one that has always protected _vector_segment_id,
+    _sqlite_embedding_count, etc.), so even a hypothetical future bug that
+    reintroduces a raise inside the consistency check would still degrade
+    to a safe "unknown" dict, not an exception reaching the caller.
+    """
+    seg = "seg-consistency-raises"
+    _seed_chroma_db(str(tmp_path), sqlite_count=50, segment_id=seg, embeddings_under_metadata=True)
+    _write_pickle(str(tmp_path), seg, hnsw_count=50)
+
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("simulated guard crash")
+
+    monkeypatch.setattr("mempalace.backends.chroma._spark_guard_check_consistency", _boom)
+    info = hnsw_capacity_status(str(tmp_path), COLLECTION, include_consistency_check=True)
+    assert isinstance(info, dict)
+    assert info["message"] == "HNSW capacity probe raised; skipping"

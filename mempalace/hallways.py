@@ -260,7 +260,7 @@ def compute_hallways_for_wing(
                 m for m in batch_metas if isinstance(m, dict) and m.get("wing") == wing
             )
             offset += len(batch_metas)
-    except Exception:
+    except Exception:  # noqa: BLE001 - logged, empty is a safe degraded return
         logger.warning(
             "compute_hallways_for_wing: collection fetch failed for %s", wing, exc_info=True
         )

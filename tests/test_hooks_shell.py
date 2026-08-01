@@ -76,7 +76,7 @@ fi
 # Everything else — JSON parsing, heredoc stdin, etc — delegate to real python.
 exec "{real_python}" "$@"
 """
-    path.write_text(shim_src)
+    path.write_text(shim_src, encoding="utf-8")
     path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     return path
 
@@ -191,7 +191,7 @@ printf '%s' "$*" > "{args_file}"
 {done_line}
 printf '{{}}'
 """
-    path.write_text(src)
+    path.write_text(src, encoding="utf-8")
     path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     return path
 
@@ -199,7 +199,7 @@ printf '{{}}'
 def _wait_for(path: Path, timeout: float = 15.0) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if path.exists() and path.read_text():
+        if path.exists() and path.read_text(encoding="utf-8"):
             return True
         time.sleep(0.05)
     return False

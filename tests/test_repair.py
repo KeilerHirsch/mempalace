@@ -78,6 +78,23 @@ def test_paginate_ids_offset_exception_fallback():
     assert "id1" in ids
 
 
+def test_paginate_ids_raises_scan_aborted_when_both_fetches_fail():
+    """Regression: if both the paginated get() AND its non-paginated
+    fallback raise, the old code silently `break`d and returned whatever
+    partial ID list had accumulated so far — indistinguishable from "the
+    palace really has exactly this many IDs" to the caller. Must fail
+    closed instead, matching the sibling probe loop in scan_and_report."""
+    col = MagicMock()
+    full_page = [f"id{i}" for i in range(1000)]
+    col.get.side_effect = [
+        {"ids": full_page},  # first page: full page, so the loop continues
+        Exception("offset bug"),  # second page (offset>0): raises
+        Exception("fallback also fails"),  # non-paginated fallback: raises too
+    ]
+    with pytest.raises(repair.ScanAborted, match="ID listing failed after 1000 IDs"):
+        repair._paginate_ids(col)
+
+
 # ── _extract_drawers ──────────────────────────────────────────────────
 
 
@@ -208,20 +225,18 @@ def test_scan_palace_all_good(mock_backend_cls, tmp_path):
 
 @patch("mempalace.repair.ChromaBackend")
 def test_scan_palace_with_bad_ids(mock_backend_cls, tmp_path):
+    # Real corruption/absence: chromadb returns the id EMPTY from get(),
+    # it does not raise (measured against chromadb 1.5.9). A batch that
+    # omits "bad1" from its result marks "bad1" corrupt.
     mock_col = MagicMock()
     mock_col.count.return_value = 2
 
     def get_side_effect(**kwargs):
         ids = kwargs.get("ids", None)
         if ids is None:
-            # paginate call
-            return {"ids": ["good1", "bad1"]}
-        if "bad1" in ids and len(ids) == 1:
-            raise Exception("corrupt")
-        if "good1" in ids and len(ids) == 1:
-            return {"ids": ["good1"]}
-        # batch probe — raise to force per-id
-        raise Exception("batch fail")
+            return {"ids": ["good1", "bad1"]}  # paginate
+        # probe batch: good1 comes back, bad1 is silently absent (corrupt)
+        return {"ids": [i for i in ids if i == "good1"]}
 
     mock_col.get.side_effect = get_side_effect
     _install_mock_backend(mock_backend_cls, mock_col)
@@ -229,6 +244,32 @@ def test_scan_palace_with_bad_ids(mock_backend_cls, tmp_path):
     good, bad = repair.scan_palace(palace_path=str(tmp_path))
     assert "good1" in good
     assert "bad1" in bad
+
+
+@patch("mempalace.repair.ChromaBackend")
+def test_scan_palace_aborts_on_fetch_exception(mock_backend_cls, tmp_path):
+    # A RAISED fetch is a backend/transient fault, not corruption. The scan
+    # must abort with ScanAborted and mark NOTHING bad — otherwise a lock
+    # contention would feed good drawers to the prune/delete step.
+    import os
+
+    mock_col = MagicMock()
+    mock_col.count.return_value = 2
+
+    def get_side_effect(**kwargs):
+        ids = kwargs.get("ids", None)
+        if ids is None:
+            return {"ids": ["good1", "good2"]}  # paginate
+        raise RuntimeError("transient lock contention")  # probe raises
+
+    mock_col.get.side_effect = get_side_effect
+    _install_mock_backend(mock_backend_cls, mock_col)
+
+    with pytest.raises(repair.ScanAborted):
+        repair.scan_palace(palace_path=str(tmp_path))
+
+    # No corrupt_ids.txt on abort — a transient fault must not feed prune.
+    assert not os.path.isfile(os.path.join(str(tmp_path), "corrupt_ids.txt"))
 
 
 @patch("mempalace.repair.ChromaBackend")
@@ -396,7 +437,7 @@ def test_rebuild_index_ignores_missing_temp_collection_at_start(
     sqlite3.connect(str(sqlite_path)).close()
 
     def _fake_copy2(src, dst, **_):
-        with open(dst, "w") as handle:
+        with open(dst, "w", encoding="utf-8") as handle:
             handle.write("backup")
 
     mock_copy.side_effect = _fake_copy2
@@ -789,7 +830,7 @@ def test_rebuild_index_live_failure_restores_backup(mock_backend_cls, mock_copy,
     sqlite3.connect(str(sqlite_path)).close()
 
     def _fake_copy2(src, dst, **_):
-        with open(dst, "w") as handle:
+        with open(dst, "w", encoding="utf-8") as handle:
             handle.write("backup")
 
     mock_copy.side_effect = _fake_copy2
@@ -835,7 +876,7 @@ def test_rebuild_index_live_delete_missing_still_restores_backup(
     sqlite3.connect(str(sqlite_path)).close()
 
     def _fake_copy2(src, dst, **_):
-        with open(dst, "w") as handle:
+        with open(dst, "w", encoding="utf-8") as handle:
             handle.write("backup")
 
     mock_copy.side_effect = _fake_copy2
@@ -883,7 +924,7 @@ def test_rebuild_index_restore_failure_preserves_original_error(
         # The restore copy reads from the timestamped backup file.
         if ".backup." in str(src):
             raise PermissionError("locked sqlite")
-        with open(dst, "w") as handle:
+        with open(dst, "w", encoding="utf-8") as handle:
             handle.write("backup")
 
     mock_copy.side_effect = _copy_side_effect
@@ -956,7 +997,7 @@ def test_rebuild_index_ignores_temp_cleanup_failure_after_success(
     sqlite3.connect(str(sqlite_path)).close()
 
     def _fake_copy2(src, dst, **_):
-        with open(dst, "w") as handle:
+        with open(dst, "w", encoding="utf-8") as handle:
             handle.write("backup")
 
     mock_copy.side_effect = _fake_copy2
@@ -1282,7 +1323,7 @@ def test_max_seq_id_backup_pruned_to_max_backups(tmp_path, monkeypatch):
     # unambiguously the newest.
     for i in range(4):
         stale = os.path.join(palace, f"chroma.sqlite3.max-seq-id-backup-2026010{i}-000000")
-        with open(stale, "w") as f:
+        with open(stale, "w", encoding="utf-8") as f:
             f.write("old")
         os.utime(stale, (1_700_000_000 + i, 1_700_000_000 + i))
 
@@ -1306,7 +1347,7 @@ def test_max_seq_id_backup_retained_when_pruning_disabled(tmp_path, monkeypatch)
 
     for i in range(3):
         stale = os.path.join(palace, f"chroma.sqlite3.max-seq-id-backup-2026010{i}-000000")
-        with open(stale, "w") as f:
+        with open(stale, "w", encoding="utf-8") as f:
             f.write("old")
         os.utime(stale, (1_700_000_000 + i, 1_700_000_000 + i))
 
@@ -1529,6 +1570,93 @@ def test_max_seq_id_preflight_preserves_embeddings_queue(tmp_path):
     # repair must leave them on disk for Chroma to drain after the bookmark is
     # unpoisoned.
     assert queue_count == 20
+
+
+def test_detect_poisoned_max_seq_ids_missing_table_is_confidently_clean(tmp_path):
+    """A missing max_seq_id table is conclusive proof of zero poisoned rows
+    (there is no table to hold them) — not a transient/unknown condition.
+    Regression: this special-case was added after it was discovered (via
+    test_rebuild_index_calls_vacuum) that treating a missing table as an
+    aborting failure broke rebuild_index on any sqlite file predating that
+    table, or any minimal test fixture without it."""
+    db_path = str(tmp_path / "chroma.sqlite3")
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("CREATE TABLE dummy (id INTEGER)")
+        conn.commit()
+
+    assert repair._detect_poisoned_max_seq_ids(db_path) == []
+
+
+def test_detect_poisoned_max_seq_ids_other_operational_error_still_raises(tmp_path, monkeypatch):
+    """A non-'no such table' OperationalError (locked db, corrupt schema,
+    disk I/O) is NOT conclusive — it must still propagate so the caller
+    (maybe_repair_poisoned_max_seq_id_before_rebuild) raises
+    PoisonDetectionAborted instead of silently treating it as clean."""
+    db_path = str(tmp_path / "chroma.sqlite3")
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("CREATE TABLE max_seq_id (segment_id TEXT, seq_id INTEGER)")
+        conn.commit()
+
+    class _LockedConn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def execute(self, *a, **kw):
+            raise sqlite3.OperationalError("database is locked")
+
+    real_connect = sqlite3.connect
+    monkeypatch.setattr(sqlite3, "connect", lambda *a, **kw: _LockedConn())
+    try:
+        with pytest.raises(sqlite3.OperationalError, match="database is locked"):
+            repair._detect_poisoned_max_seq_ids(db_path)
+    finally:
+        monkeypatch.setattr(sqlite3, "connect", real_connect)
+
+
+def test_max_seq_id_preflight_raises_on_detector_crash(tmp_path, monkeypatch):
+    """Regression: a crashed poison-probe must NOT be treated as 'clean'.
+
+    Before the fix, `except Exception: return None` made a detector crash
+    indistinguishable from "not poisoned" to the caller (rebuild_index),
+    letting it fall through into the destructive legacy rebuild path. The
+    probe failing to run is not evidence the palace is unpoisoned — it must
+    abort loudly instead."""
+    palace = str(tmp_path / "palace")
+    _seed_poisoned_max_seq_id(palace)
+
+    monkeypatch.setattr(
+        repair,
+        "_detect_poisoned_max_seq_ids",
+        lambda db_path, **kw: (_ for _ in ()).throw(sqlite3.OperationalError("database is locked")),
+    )
+
+    with pytest.raises(repair.PoisonDetectionAborted, match="database is locked"):
+        repair.maybe_repair_poisoned_max_seq_id_before_rebuild(palace, assume_yes=True)
+
+
+def test_rebuild_index_aborts_on_poison_detection_crash_instead_of_rebuilding(
+    tmp_path, capsys, monkeypatch
+):
+    """rebuild_index must abort (not proceed to the legacy rebuild) when the
+    poison preflight itself cannot be trusted, matching the fail-closed
+    contract PoisonDetectionAborted documents."""
+    palace = str(tmp_path / "palace")
+    _seed_poisoned_max_seq_id(palace)
+
+    def _boom(*a, **kw):
+        raise repair.PoisonDetectionAborted("poisoned max_seq_id probe failed: boom")
+
+    monkeypatch.setattr(repair, "maybe_repair_poisoned_max_seq_id_before_rebuild", _boom)
+
+    with patch("mempalace.repair.ChromaBackend") as mock_backend:
+        repair.rebuild_index(palace)
+
+    mock_backend.return_value.get_collection.assert_not_called()
+    out = capsys.readouterr().out
+    assert "poisoned max_seq_id probe failed" in out
 
 
 def test_rebuild_index_repairs_poisoned_max_seq_id_before_collection_rebuild(tmp_path, capsys):
@@ -1963,8 +2091,19 @@ def test_rebuild_from_sqlite_honors_configured_drawer_collection_name(tmp_path, 
 
     # Default-name collection must NOT exist in dest — proves we did not
     # silently fall back to the hardcoded name during rebuild.
+    #
+    # Regression: the original `except Exception: pass` here also caught
+    # the AssertionError from the count()==0 check below it (AssertionError
+    # IS an Exception), so this test could never fail even if the leak it
+    # claims to detect actually happened. Catch only the specific
+    # not-found exception; let a real assertion failure propagate.
+    from mempalace.backends.base import CollectionNotInitializedError
+
     try:
         rebuilt_default = backend.get_collection(str(dest), "mempalace_drawers")
+    except CollectionNotInitializedError:
+        pass  # Expected: collection wasn't created.
+    else:
         # If get_collection returns without raising, count() should be 0
         # (chromadb may auto-create on get with some EFs); a non-zero
         # count would mean we wrote rows to the wrong collection.
@@ -1972,8 +2111,6 @@ def test_rebuild_from_sqlite_honors_configured_drawer_collection_name(tmp_path, 
             "rebuild leaked rows into the default-name collection on a "
             "custom-name palace — recovery wrote to the wrong collection."
         )
-    except Exception:
-        pass  # Expected: collection wasn't created.
 
 
 # ── _vacuum_and_rebuild_fts5 ──────────────────────────────────────────

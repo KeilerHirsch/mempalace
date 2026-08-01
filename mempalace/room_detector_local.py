@@ -171,23 +171,19 @@ def detect_rooms_from_folders(project_dir: str) -> list:
     # Build room list
     rooms = []
     for room_name, original in found_rooms.items():
-        rooms.append(
-            {
-                "name": room_name,
-                "description": f"Files from {original}/",
-                "keywords": [room_name, original.lower()],
-            }
-        )
+        rooms.append({
+            "name": room_name,
+            "description": f"Files from {original}/",
+            "keywords": [room_name, original.lower()],
+        })
 
     # Always add "general" as fallback
     if not any(r["name"] == "general" for r in rooms):
-        rooms.append(
-            {
-                "name": "general",
-                "description": "Files that don't fit other rooms",
-                "keywords": [],
-            }
-        )
+        rooms.append({
+            "name": "general",
+            "description": "Files that don't fit other rooms",
+            "keywords": [],
+        })
 
     return rooms
 
@@ -214,13 +210,11 @@ def detect_rooms_from_files(project_dir: str) -> list:
     rooms = []
     for room, count in sorted(keyword_counts.items(), key=lambda x: x[1], reverse=True):
         if count >= 2:
-            rooms.append(
-                {
-                    "name": room,
-                    "description": f"Files related to {room}",
-                    "keywords": [room],
-                }
-            )
+            rooms.append({
+                "name": room,
+                "description": f"Files related to {room}",
+                "keywords": [room],
+            })
         if len(rooms) >= 6:
             break
 
@@ -292,7 +286,7 @@ def save_config(project_dir: str, project_name: str, rooms: list):
         ],
     }
     config_path = Path(project_dir).expanduser().resolve() / "mempalace.yaml"
-    with open(config_path, "w") as f:
+    with open(config_path, "w", encoding="utf-8") as f:
         yaml.dump(config, f, default_flow_style=False, sort_keys=False)
 
     print(f"\n  Config saved: {config_path}")

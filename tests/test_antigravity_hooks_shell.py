@@ -93,7 +93,7 @@ def _poll_log_contains(log_path: Path, needle: str, timeout: float = 5.0) -> boo
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if log_path.is_file():
-            body = log_path.read_text(errors="replace")
+            body = log_path.read_text(encoding="utf-8", errors="replace")
             if needle in body:
                 return True
         time.sleep(0.05)

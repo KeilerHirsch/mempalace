@@ -134,17 +134,15 @@ def _check_entity_confusion(text: str, entity_names_raw: dict) -> list:
                 continue
             distance = _edit_distance(a_lower, name_b.lower())
             if 0 < distance <= 2:
-                issues.append(
-                    {
-                        "type": "similar_name",
-                        "detail": (
-                            f"'{name_a}' mentioned — did you mean "
-                            f"'{name_b}'? (edit distance {distance})"
-                        ),
-                        "names": [name_a, name_b],
-                        "distance": distance,
-                    }
-                )
+                issues.append({
+                    "type": "similar_name",
+                    "detail": (
+                        f"'{name_a}' mentioned — did you mean "
+                        f"'{name_b}'? (edit distance {distance})"
+                    ),
+                    "names": [name_a, name_b],
+                    "distance": distance,
+                })
                 seen_pairs.add(pair_key)
     return issues
 
@@ -168,14 +166,12 @@ def _extract_claims(text: str) -> list:
                 subject, possessor, role = groups[0], groups[1], groups[2]
             else:
                 possessor, role, subject = groups[0], groups[1], groups[2]
-            claims.append(
-                {
-                    "subject": subject,
-                    "predicate": role.lower(),
-                    "object": possessor,
-                    "span": match.group(0),
-                }
-            )
+            claims.append({
+                "subject": subject,
+                "predicate": role.lower(),
+                "object": possessor,
+                "span": match.group(0),
+            })
     return claims
 
 
@@ -205,7 +201,7 @@ def _check_kg_contradictions(text: str, palace_path: str) -> list:
         # TypeError, silently swallowed by the outer except and rendered
         # the entire KG-check path dead.
         kg = KnowledgeGraph(db_path=os.path.join(palace_path, "knowledge_graph.sqlite3"))
-    except Exception:
+    except Exception:  # noqa: BLE001 - KG unavailable, optional feature, explicit skip
         # KG unavailable (brand-new palace, corrupted DB, etc.) — skip.
         return []
 
@@ -216,7 +212,7 @@ def _check_kg_contradictions(text: str, palace_path: str) -> list:
         claim_obj = claim["object"]
         try:
             facts = kg.query_entity(subject, direction="outgoing")
-        except Exception:
+        except Exception:  # noqa: BLE001 - per-subject lookup failure, loop continues to next claim
             logger.debug("KG lookup failed for subject %r", subject, exc_info=True)
             continue
         if not facts:
@@ -230,24 +226,22 @@ def _check_kg_contradictions(text: str, palace_path: str) -> list:
                 continue
             kg_pred = (fact.get("predicate") or "").lower()
             if kg_pred and kg_pred != claim_pred:
-                issues.append(
-                    {
-                        "type": "relationship_mismatch",
-                        "detail": (
-                            f"Text says '{claim['span']}' but KG records "
-                            f"{subject} {kg_pred} {fact.get('object')}"
-                        ),
-                        "entity": subject,
-                        "claim": {
-                            "predicate": claim_pred,
-                            "object": claim_obj,
-                        },
-                        "kg_fact": {
-                            "predicate": kg_pred,
-                            "object": fact.get("object"),
-                        },
-                    }
-                )
+                issues.append({
+                    "type": "relationship_mismatch",
+                    "detail": (
+                        f"Text says '{claim['span']}' but KG records "
+                        f"{subject} {kg_pred} {fact.get('object')}"
+                    ),
+                    "entity": subject,
+                    "claim": {
+                        "predicate": claim_pred,
+                        "object": claim_obj,
+                    },
+                    "kg_fact": {
+                        "predicate": kg_pred,
+                        "object": fact.get("object"),
+                    },
+                })
 
         # Stale fact: exact match on (subject, predicate, object) but KG
         # closed the window in the past.
@@ -262,17 +256,14 @@ def _check_kg_contradictions(text: str, palace_path: str) -> list:
                 continue
             valid_to = fact.get("valid_to")
             if valid_to and str(valid_to) < now_iso:
-                issues.append(
-                    {
-                        "type": "stale_fact",
-                        "detail": (
-                            f"Text says '{claim['span']}' but KG marks "
-                            f"this fact closed on {valid_to}"
-                        ),
-                        "entity": subject,
-                        "valid_to": valid_to,
-                    }
-                )
+                issues.append({
+                    "type": "stale_fact",
+                    "detail": (
+                        f"Text says '{claim['span']}' but KG marks this fact closed on {valid_to}"
+                    ),
+                    "entity": subject,
+                    "valid_to": valid_to,
+                })
 
     return issues
 

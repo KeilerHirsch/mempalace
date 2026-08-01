@@ -25,7 +25,7 @@ def _setup_palace(tmpdir):
     os.makedirs(project_a / "frontend")
     write_file(project_a / "backend" / "server.py", "def serve():\n    return 'ok'\n" * 20)
     write_file(project_a / "frontend" / "app.js", "function render() { return 'hi'; }\n" * 20)
-    with open(project_a / "mempalace.yaml", "w") as f:
+    with open(project_a / "mempalace.yaml", "w", encoding="utf-8") as f:
         yaml.dump(
             {
                 "wing": "alpha",
@@ -40,7 +40,7 @@ def _setup_palace(tmpdir):
     # Project B: wing=beta, rooms=docs
     os.makedirs(project_b / "docs")
     write_file(project_b / "docs" / "guide.md", "# Guide\n\nThis explains things.\n" * 20)
-    with open(project_b / "mempalace.yaml", "w") as f:
+    with open(project_b / "mempalace.yaml", "w", encoding="utf-8") as f:
         yaml.dump(
             {
                 "wing": "beta",

@@ -115,16 +115,14 @@ logger = logging.getLogger("mempalace_format_miner")
 
 # Extensions MarkItDown can convert. Lowercase, leading dot. Case-insensitive
 # match performed against ``Path.suffix.lower()``.
-SUPPORTED_FORMATS = frozenset(
-    {
-        ".pdf",
-        ".docx",
-        ".pptx",
-        ".xlsx",
-        ".rtf",
-        ".epub",
-    }
-)
+SUPPORTED_FORMATS = frozenset({
+    ".pdf",
+    ".docx",
+    ".pptx",
+    ".xlsx",
+    ".rtf",
+    ".epub",
+})
 
 
 # Same default cap as miner.py / convo_miner.py — guards against pathological
@@ -179,14 +177,12 @@ class ExtractionStatus(enum.Enum):
 # defeat re-mining after the missing piece is installed / the network is
 # back. The orchestrator (``mine_formats``) checks this set before calling
 # ``_register_file``. Per PR #1555 review (Copilot #14).
-_TRANSIENT_MISSING_DEP_STATUSES = frozenset(
-    {
-        ExtractionStatus.SKIP_NO_MARKITDOWN,
-        ExtractionStatus.SKIP_NO_STRIPRTF,
-        ExtractionStatus.SKIP_MISSING_FORMAT_DEPS,
-        ExtractionStatus.SKIP_NETWORK_TIMEOUT,
-    }
-)
+_TRANSIENT_MISSING_DEP_STATUSES = frozenset({
+    ExtractionStatus.SKIP_NO_MARKITDOWN,
+    ExtractionStatus.SKIP_NO_STRIPRTF,
+    ExtractionStatus.SKIP_MISSING_FORMAT_DEPS,
+    ExtractionStatus.SKIP_NETWORK_TIMEOUT,
+})
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -413,7 +409,7 @@ def extract_text(
         # Fringe Case 6 — permission denied during file read.
         logger.info("skip:permission %s", p)
         return None, ExtractionStatus.SKIP_PERMISSION
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - converted to typed ExtractionStatus.SKIP_EXTRACTION_ERROR
         # Fringe Case 14 (PR #1555 review, Igor): MarkItDown raises
         # ``MissingDependencyException`` when a per-format sub-extra
         # (e.g. ``markitdown[pdf]``) isn't installed. Surface this as a
@@ -578,7 +574,7 @@ def _register_file(collection, source_file: str, wing: str, agent: str) -> None:
                 }
             ],
         )
-    except Exception:
+    except Exception:  # noqa: BLE001 - non-essential idempotency optimization, file may rescan later
         logger.debug("Sentinel write failed for %s", source_file, exc_info=True)
 
 
@@ -633,7 +629,7 @@ def _file_chunks_locked(
 
         try:
             collection.delete(where={"source_file": source_file})
-        except Exception:
+        except Exception:  # noqa: BLE001 - logged, mirrors diary_ingest.py stale-purge pattern
             logger.debug("Stale-drawer purge failed for %s", source_file, exc_info=True)
 
         filed_at = datetime.now().isoformat()
@@ -772,7 +768,7 @@ def mine_formats(
                 }
             ],
         )
-    except Exception:
+    except Exception:  # noqa: BLE001 - falls back to single default room, logged at debug
         logger.debug("mine_formats: load_config fallback to default rooms", exc_info=True)
         rooms = [
             {
@@ -902,7 +898,7 @@ def mine_formats(
                 print(f"  + [{i:4}/{len(files)}] {filepath.name[:50]:50} +{drawers_added}")
                 if limit > 0 and files_mined >= limit:
                     break
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - per-file recovery, logged, loop continues
                 # Log and continue — one malformed file shouldn't kill the
                 # whole mine. Mirrors miner.py's per-file recovery.
                 files_errored += 1
@@ -920,7 +916,7 @@ def mine_formats(
         # Partial progress is safe — deterministic drawer IDs mean a re-mine
         # upserts to the same rows. Print a clean summary and exit.
         print("\n  Mine interrupted by user (Ctrl-C).")
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - defense-in-depth outer catch, explicitly documented
         # Defense in depth — the per-file try/except above catches most
         # realistic crashes, but a programming error in the outer-loop
         # plumbing (file enumeration, scan_formats itself, etc.) would
@@ -948,7 +944,7 @@ def mine_formats(
                 tunnels_added = _compute_topic_tunnels_for_wing(wing)
                 if tunnels_added:
                     print(f"\n  Topic tunnels: +{tunnels_added} cross-wing link(s)")
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - best-effort, must never fail a mine
                 logger.warning(
                     "mine_formats: topic tunnel computation skipped — %s: %s",
                     type(exc).__name__,
@@ -977,7 +973,7 @@ def mine_formats(
         if _cleanup_mine_pid_file is not None:
             try:
                 _cleanup_mine_pid_file()
-            except Exception:
+            except Exception:  # noqa: BLE001 - best-effort PID-file cleanup in finally block
                 logger.debug("mine_formats: _cleanup_mine_pid_file failed", exc_info=True)
 
     _print_mine_summary(

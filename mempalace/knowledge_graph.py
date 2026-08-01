@@ -515,19 +515,17 @@ class KnowledgeGraph:
                 params = [eid] + temporal_params
 
                 for row in conn.execute(query, params).fetchall():
-                    results.append(
-                        {
-                            "direction": "outgoing",
-                            "subject": name,
-                            "predicate": row["predicate"],
-                            "object": row["obj_name"],
-                            "valid_from": row["valid_from"],
-                            "valid_to": row["valid_to"],
-                            "confidence": row["confidence"],
-                            "source_closet": row["source_closet"],
-                            "current": row["valid_to"] is None,
-                        }
-                    )
+                    results.append({
+                        "direction": "outgoing",
+                        "subject": name,
+                        "predicate": row["predicate"],
+                        "object": row["obj_name"],
+                        "valid_from": row["valid_from"],
+                        "valid_to": row["valid_to"],
+                        "confidence": row["confidence"],
+                        "source_closet": row["source_closet"],
+                        "current": row["valid_to"] is None,
+                    })
 
             if direction in ("incoming", "both"):
                 query = (
@@ -537,19 +535,17 @@ class KnowledgeGraph:
                 params = [eid] + temporal_params
 
                 for row in conn.execute(query, params).fetchall():
-                    results.append(
-                        {
-                            "direction": "incoming",
-                            "subject": row["sub_name"],
-                            "predicate": row["predicate"],
-                            "object": name,
-                            "valid_from": row["valid_from"],
-                            "valid_to": row["valid_to"],
-                            "confidence": row["confidence"],
-                            "source_closet": row["source_closet"],
-                            "current": row["valid_to"] is None,
-                        }
-                    )
+                    results.append({
+                        "direction": "incoming",
+                        "subject": row["sub_name"],
+                        "predicate": row["predicate"],
+                        "object": name,
+                        "valid_from": row["valid_from"],
+                        "valid_to": row["valid_to"],
+                        "confidence": row["confidence"],
+                        "source_closet": row["source_closet"],
+                        "current": row["valid_to"] is None,
+                    })
 
         return results
 
@@ -576,16 +572,14 @@ class KnowledgeGraph:
         with self._lock:
             conn = self._conn()
             for row in conn.execute(query, params).fetchall():
-                results.append(
-                    {
-                        "subject": row["sub_name"],
-                        "predicate": pred,
-                        "object": row["obj_name"],
-                        "valid_from": row["valid_from"],
-                        "valid_to": row["valid_to"],
-                        "current": row["valid_to"] is None,
-                    }
-                )
+                results.append({
+                    "subject": row["sub_name"],
+                    "predicate": pred,
+                    "object": row["obj_name"],
+                    "valid_from": row["valid_from"],
+                    "valid_to": row["valid_to"],
+                    "current": row["valid_to"] is None,
+                })
         return results
 
     def timeline(self, entity_name: str = None):

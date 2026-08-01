@@ -24,13 +24,11 @@ def test_normalize_transcript_path_preserves_spaces_and_unicode():
 
 
 def test_parse_stop_payload_keeps_session_strict_but_path_not_over_sanitized():
-    session_id, stop_active, transcript_path = hook_shell.parse_stop_payload(
-        {
-            "session_id": "../bad session!!",
-            "stop_hook_active": "yes",
-            "transcript_path": r"C:\Users\Me User\.claude\projects\emoji 🧠\session.jsonl",
-        }
-    )
+    session_id, stop_active, transcript_path = hook_shell.parse_stop_payload({
+        "session_id": "../bad session!!",
+        "stop_hook_active": "yes",
+        "transcript_path": r"C:\Users\Me User\.claude\projects\emoji 🧠\session.jsonl",
+    })
 
     assert session_id == "badsession"
     assert stop_active == "True"

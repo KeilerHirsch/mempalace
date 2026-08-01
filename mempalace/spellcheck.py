@@ -51,7 +51,7 @@ def _get_system_words() -> set:
     global _system_words
     if _system_words is None:
         if _SYSTEM_DICT.exists():
-            with open(_SYSTEM_DICT) as f:
+            with open(_SYSTEM_DICT, encoding="utf-8") as f:
                 _system_words = {w.strip().lower() for w in f if w.strip()}
         else:
             _system_words = set()
@@ -124,7 +124,7 @@ def _load_known_names() -> set:
             for alias in entity.get("aliases", []):
                 names.add(alias.lower())
         return names
-    except Exception:
+    except Exception:  # noqa: BLE001 - optional best-effort registry load, empty allowlist on failure
         return set()
 
 

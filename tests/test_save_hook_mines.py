@@ -26,7 +26,7 @@ class TestSaveHookAutoMines:
             "hooks",
             "mempal_save_hook.sh",
         )
-        src = open(hook_path).read()
+        src = open(hook_path, encoding="utf-8").read()
 
         # The hook must drive the conversation mine off TRANSCRIPT_PATH,
         # using `dirname` to derive the parent dir, and tagging it with
@@ -48,7 +48,7 @@ class TestSaveHookAutoMines:
             "hooks",
             "mempal_save_hook.sh",
         )
-        src = open(hook_path).read()
+        src = open(hook_path, encoding="utf-8").read()
 
         # Check if MEMPAL_DIR defaults to empty
         has_empty_default = 'MEMPAL_DIR=""' in src
@@ -77,7 +77,7 @@ class TestShellHookTranscriptValidation:
     @staticmethod
     def _hook_src(name: str) -> str:
         path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "hooks", name)
-        return open(path).read()
+        return open(path, encoding="utf-8").read()
 
     @staticmethod
     def _strip_comments(src: str) -> str:

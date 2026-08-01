@@ -10,7 +10,6 @@ Kontext: auf Windows ist msvcrt-Locking fragiler als POSIX-flock, der
 Nicht-MineAlreadyRunning-Exception-Pfad wird dort real getroffen -> fail-open
 aktiviert sich -> stiller Index-Verlust. Auf Linux fast toter Code.
 """
-import pytest
 
 
 def _reset(mcp_server, monkeypatch):

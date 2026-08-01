@@ -114,15 +114,13 @@ def export_palace(palace_path: str, output_dir: str, format: str = "markdown") -
         for doc_id, doc, meta in zip(batch["ids"], batch["documents"], batch["metadatas"]):
             wing = meta.get("wing", "unknown")
             room = meta.get("room", "general")
-            batch_grouped[wing][room].append(
-                {
-                    "id": doc_id,
-                    "content": doc,
-                    "source": meta.get("source_file", ""),
-                    "filed_at": meta.get("filed_at", ""),
-                    "added_by": meta.get("added_by", ""),
-                }
-            )
+            batch_grouped[wing][room].append({
+                "id": doc_id,
+                "content": doc,
+                "source": meta.get("source_file", ""),
+                "filed_at": meta.get("filed_at", ""),
+                "added_by": meta.get("added_by", ""),
+            })
 
         # Write/append each room file
         for wing, rooms in batch_grouped.items():

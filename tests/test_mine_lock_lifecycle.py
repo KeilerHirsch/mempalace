@@ -73,7 +73,7 @@ def _stale_waiter_target(
             Path(entered_flag).touch()
             _wait_for_path(Path(release_flag))
         result_q.put(("done", True))
-    except BaseException as exc:  # pragma: no cover - surfaced through queue
+    except BaseException as exc:  # noqa: BLE001 - subprocess must report all errors to parent  # pragma: no cover - surfaced through queue
         result_q.put(("error", repr(exc)))
 
 
@@ -214,12 +214,12 @@ def test_mine_lock_retries_when_waiter_wakes_on_unlinked_inode(tmp_path, monkeyp
         if replacement_lf is not None:
             try:
                 _unlock_mine_lock_file(replacement_lf)
-            except Exception:
+            except Exception:  # noqa: BLE001 - best-effort lock release in teardown
                 pass
             replacement_lf.close()
         if old_lf is not None:
             try:
                 _unlock_mine_lock_file(old_lf)
-            except Exception:
+            except Exception:  # noqa: BLE001 - best-effort lock release in teardown
                 pass
             old_lf.close()

@@ -18,7 +18,7 @@ class TestSaveHookVerboseMode:
             "hooks",
             "mempal_save_hook.sh",
         )
-        src = open(hook_path).read()
+        src = open(hook_path, encoding="utf-8").read()
         has_verbose = "VERBOSE" in src or "verbose" in src or "SILENT" in src or "silent" in src
         assert has_verbose, (
             "Save hook has no verbose/silent toggle. "
@@ -34,7 +34,7 @@ class TestSaveHookVerboseMode:
             "hooks",
             "mempal_save_hook.sh",
         )
-        src = open(hook_path).read()
+        src = open(hook_path, encoding="utf-8").read()
         # There should be TWO decision paths: block (verbose) and allow (silent)
         has_block = '"decision": "block"' in src or "'decision': 'block'" in src
         has_allow = '"decision": "allow"' in src or "'decision': 'allow'" in src

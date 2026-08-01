@@ -365,6 +365,6 @@ def test_milvus_zilliz_cloud_roundtrip_when_enabled(tmp_path):
         try:
             if col._client.has_collection(col._remote_collection):
                 col._client.drop_collection(col._remote_collection)
-        except Exception:
+        except Exception:  # noqa: BLE001 - best-effort collection drop in teardown
             pass
         backend.close()

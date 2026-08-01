@@ -130,7 +130,7 @@ def _call_llm(cfg: LLMConfig, source_file: str, wing: str, room: str, content: s
         from mempalace.i18n import t
 
         lang_instruction = t("aaak.instruction")
-    except Exception:
+    except Exception:  # noqa: BLE001 - optional i18n lookup, harmless fallback to empty string
         lang_instruction = ""
 
     prompt = PROMPT_TEMPLATE.format(
@@ -142,13 +142,11 @@ def _call_llm(cfg: LLMConfig, source_file: str, wing: str, room: str, content: s
     if lang_instruction and "english" not in lang_instruction.lower():
         prompt += f"\n\nLanguage instruction: {lang_instruction}"
 
-    body = json.dumps(
-        {
-            "model": cfg.model,
-            "max_tokens": MAX_OUTPUT_TOKENS,
-            "messages": [{"role": "user", "content": prompt}],
-        }
-    ).encode("utf-8")
+    body = json.dumps({
+        "model": cfg.model,
+        "max_tokens": MAX_OUTPUT_TOKENS,
+        "messages": [{"role": "user", "content": prompt}],
+    }).encode("utf-8")
 
     headers = {"Content-Type": "application/json"}
     if cfg.key:
@@ -179,10 +177,18 @@ def _call_llm(cfg: LLMConfig, source_file: str, wing: str, room: str, content: s
                 time.sleep(2**attempt)
                 continue
             return None, None
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - broad by necessity (urllib/JSON/provider errors), always logged below
             if "rate" in str(e).lower() and attempt < 2:
                 time.sleep(2**attempt)
                 continue
+            import logging
+
+            logging.getLogger("mempalace_mcp").warning(
+                "closet LLM call failed for %s; falling back to regex closets: %s",
+                source_file,
+                e,
+                exc_info=True,
+            )
             return None, None
     return None, None
 
@@ -303,7 +309,8 @@ def regenerate_closets(
         # otherwise a regex closet rebuild mid-regenerate races with our
         # purge+upsert cycle and leaves mixed regex/LLM lines.
         with mine_lock(source):
-            purge_file_closets(closets_col, source)
+            if not purge_file_closets(closets_col, source):
+                print(f"  [{i}/{len(sources)}] warning: stale closet purge failed for {source}")
             upsert_closet_lines(
                 closets_col,
                 closet_id_base,

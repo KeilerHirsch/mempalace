@@ -127,10 +127,12 @@ def is_current(
     """
     return False
 
+
 def source_summary(self, *, source: SourceRef) -> SourceSummary:
     """Describe a source without extracting (e.g., 'git repo mempalace,
     847 commits, 132 PRs'). Default: returns empty summary."""
     return SourceSummary(description=self.name)
+
 
 def close(self) -> None:
     return None
@@ -143,7 +145,7 @@ for result in adapter.ingest(source=source, palace=ctx):
     if isinstance(result, SourceItemMetadata):
         existing = ctx.collection.get(where={"source_file": result.source_file}, limit=1)
         if adapter.is_current(item=result, existing_metadata=existing):
-            ctx.skip_current_item()   # adapter stops yielding drawers for this item
+            ctx.skip_current_item()  # adapter stops yielding drawers for this item
     elif isinstance(result, DrawerRecord):
         ctx.upsert_drawer(result)
 ```
@@ -159,26 +161,34 @@ class SourceRef:
     uri is for URL-like references (github.com/org/repo, slack://workspace/channel).
     options carries adapter-specific config (non-secret values only; §M2).
     """
+
     local_path: str | None = None
     uri: str | None = None
     options: dict = field(default_factory=dict)
 
+
 @dataclass(frozen=True)
 class SourceItemMetadata:
     """Lightweight pointer yielded before drawers for lazy-fetch adapters."""
-    source_file: str                 # Logical identity — filesystem path, PR URI, etc.
-    version: str                     # Source-side version token (mtime, commit SHA, ETag, rev id).
-    size_hint: int | None = None     # Bytes, if known. Used for progress reporting.
+
+    source_file: str  # Logical identity — filesystem path, PR URI, etc.
+    version: str  # Source-side version token (mtime, commit SHA, ETag, rev id).
+    size_hint: int | None = None  # Bytes, if known. Used for progress reporting.
     route_hint: RouteHint | None = None
+
 
 @dataclass(frozen=True)
 class DrawerRecord:
     """One drawer's worth of content plus metadata."""
-    content: str                     # Subject to §1.4 declared transformations.
-    source_file: str                 # Foreign key to SourceItemMetadata.source_file.
-    chunk_index: int = 0             # 0 for single-drawer items; 0..N-1 for chunked items.
-    metadata: dict = field(default_factory=dict)  # Flat: str/int/float/bool only. Must conform to adapter schema.
+
+    content: str  # Subject to §1.4 declared transformations.
+    source_file: str  # Foreign key to SourceItemMetadata.source_file.
+    chunk_index: int = 0  # 0 for single-drawer items; 0..N-1 for chunked items.
+    metadata: dict = field(
+        default_factory=dict
+    )  # Flat: str/int/float/bool only. Must conform to adapter schema.
     route_hint: RouteHint | None = None
+
 
 @dataclass(frozen=True)
 class RouteHint:
@@ -186,10 +196,12 @@ class RouteHint:
     room: str | None = None
     hall: str | None = None
 
+
 @dataclass(frozen=True)
 class SourceSummary:
     description: str
     item_count: int | None = None
+
 
 # IngestResult is the union type adapters yield.
 IngestResult = SourceItemMetadata | DrawerRecord
@@ -250,7 +262,9 @@ A single adapter declares one or more of three modes via a class attribute:
 
 ```python
 class BaseSourceAdapter(ABC):
-    supported_modes: ClassVar[frozenset[Literal["chunked_content", "whole_record", "metadata_only"]]]
+    supported_modes: ClassVar[
+        frozenset[Literal["chunked_content", "whole_record", "metadata_only"]]
+    ]
 ```
 
 | Mode | Content origin |
@@ -298,13 +312,13 @@ Current `convo_miner.py` does not build closets for conversation drawers — an 
 
 ```python
 class BaseSourceAdapter(ABC):
-    name: ClassVar[str]                    # "filesystem", "cursor", "git", "slack", ...
+    name: ClassVar[str]  # "filesystem", "cursor", "git", "slack", ...
     spec_version: ClassVar[str] = "1.0"
-    adapter_version: ClassVar[str]         # Independent of spec_version; recorded on every drawer.
+    adapter_version: ClassVar[str]  # Independent of spec_version; recorded on every drawer.
     capabilities: ClassVar[frozenset[str]]
-    supported_modes: ClassVar[frozenset[str]]             # Per §1.5.
-    declared_transformations: ClassVar[frozenset[str]]    # Per §1.4.
-    default_privacy_class: ClassVar[str]                  # Per §6.
+    supported_modes: ClassVar[frozenset[str]]  # Per §1.5.
+    declared_transformations: ClassVar[frozenset[str]]  # Per §1.4.
+    default_privacy_class: ClassVar[str]  # Per §6.
 ```
 
 Defined capability tokens (v1):
@@ -497,15 +511,16 @@ Each adapter returns an `AdapterSchema` from `describe_schema()`:
 ```python
 @dataclass(frozen=True)
 class AdapterSchema:
-    fields: dict[str, FieldSpec]   # Keyed by metadata key.
+    fields: dict[str, FieldSpec]  # Keyed by metadata key.
     version: str
+
 
 @dataclass(frozen=True)
 class FieldSpec:
     type: Literal["string", "int", "float", "bool", "delimiter_joined_string", "json_string"]
     required: bool
     description: str
-    indexed: bool = False           # Hint to backends that can build indexes (RFC 001 §2.1).
+    indexed: bool = False  # Hint to backends that can build indexes (RFC 001 §2.1).
     # delimiter_joined_string: the delimiter character (default ";").
     delimiter: str = ";"
     # json_string: the JSON schema of the encoded object (informational only).
@@ -520,12 +535,20 @@ Example for a hypothetical `slack` adapter:
 AdapterSchema(
     version="1.0",
     fields={
-        "channel_name": FieldSpec(type="string", required=True, description="Slack channel name", indexed=True),
+        "channel_name": FieldSpec(
+            type="string", required=True, description="Slack channel name", indexed=True
+        ),
         "channel_id": FieldSpec(type="string", required=True, description="Slack channel ID"),
         "thread_ts": FieldSpec(type="string", required=False, description="Thread root timestamp"),
-        "author_id": FieldSpec(type="string", required=True, description="Slack user ID", indexed=True),
-        "author_name": FieldSpec(type="string", required=True, description="Display name at extraction time"),
-        "reactions": FieldSpec(type="delimiter_joined_string", required=False, description="Emoji shortcodes"),
+        "author_id": FieldSpec(
+            type="string", required=True, description="Slack user ID", indexed=True
+        ),
+        "author_name": FieldSpec(
+            type="string", required=True, description="Display name at extraction time"
+        ),
+        "reactions": FieldSpec(
+            type="delimiter_joined_string", required=False, description="Emoji shortcodes"
+        ),
     },
 )
 ```
@@ -541,7 +564,9 @@ This is how "structured data" serves company use cases without breaking transfor
 Adapters with `supports_entity_hints` MAY include:
 
 ```python
-metadata["entity_hints_json"] = '[{"type":"person","name":"Milla Jovovich","confidence":0.95,"offset":120},{"type":"project","name":"MemPalace","confidence":1.0,"offset":0}]'
+metadata["entity_hints_json"] = (
+    '[{"type":"person","name":"Milla Jovovich","confidence":0.95,"offset":120},{"type":"project","name":"MemPalace","confidence":1.0,"offset":0}]'
+)
 ```
 
 The value is a JSON-encoded string (type `json_string` in the adapter schema). Core parses on read and feeds into `mempalace/entity_detector.py` as a prior: hints with `confidence >= 0.9` bypass the heuristic detector; lower-confidence hints feed into it as candidates.
@@ -558,7 +583,7 @@ The adapter calls the existing `KnowledgeGraph.add_triple()` (signature verified
 palace.kg.add_triple(
     subject="Ben",
     predicate="committed",
-    obj="PR-567",                    # `object` is a Python builtin — the API uses `obj`.
+    obj="PR-567",  # `object` is a Python builtin — the API uses `obj`.
     valid_from="2026-03-12",
     confidence=1.0,
     source_file=drawer.source_file,  # Existing provenance parameter.
@@ -613,6 +638,7 @@ MemPalace ships `mempalace.sources.testing.AbstractSourceAdapterContractSuite` �
 
 ```python
 from mempalace.sources.testing import AbstractSourceAdapterContractSuite
+
 
 class TestCursorAdapter(AbstractSourceAdapterContractSuite):
     @pytest.fixture

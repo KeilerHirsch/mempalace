@@ -46,7 +46,7 @@ def test_init_idempotent(tmp_path):
     cfg = MempalaceConfig(config_dir=str(tmp_path))
     cfg.init()
     cfg.init()  # second call should not overwrite
-    with open(tmp_path / "config.json") as f:
+    with open(tmp_path / "config.json", encoding="utf-8") as f:
         data = json.load(f)
     assert "palace_path" in data
 
@@ -55,7 +55,7 @@ def test_save_people_map(tmp_path):
     cfg = MempalaceConfig(config_dir=str(tmp_path))
     result = cfg.save_people_map({"alice": "Alice Smith"})
     assert result.exists()
-    with open(result) as f:
+    with open(result, encoding="utf-8") as f:
         data = json.load(f)
     assert data["alice"] == "Alice Smith"
 

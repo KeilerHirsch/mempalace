@@ -24,14 +24,14 @@ def test_default_config():
 
 def test_config_from_file():
     tmpdir = tempfile.mkdtemp()
-    with open(os.path.join(tmpdir, "config.json"), "w") as f:
+    with open(os.path.join(tmpdir, "config.json"), "w", encoding="utf-8") as f:
         json.dump({"palace_path": "/custom/palace"}, f)
     cfg = MempalaceConfig(config_dir=tmpdir)
     assert cfg.palace_path == "/custom/palace"
 
 
 def test_backend_from_config_wins_over_env(tmp_path, monkeypatch):
-    with open(tmp_path / "config.json", "w") as f:
+    with open(tmp_path / "config.json", "w", encoding="utf-8") as f:
         json.dump({"backend": "sqlite_exact"}, f)
     monkeypatch.setenv("MEMPALACE_BACKEND", "chroma")
 
@@ -47,7 +47,7 @@ def test_backend_from_env_when_config_absent(tmp_path, monkeypatch):
 
 
 def test_qdrant_config_from_env_and_file(tmp_path, monkeypatch):
-    with open(tmp_path / "config.json", "w") as f:
+    with open(tmp_path / "config.json", "w", encoding="utf-8") as f:
         json.dump(
             {
                 "qdrant_url": "http://config.example:6333",
@@ -71,7 +71,7 @@ def test_qdrant_config_from_env_and_file(tmp_path, monkeypatch):
 
 
 def test_milvus_config_from_env_and_file(tmp_path, monkeypatch):
-    with open(tmp_path / "config.json", "w") as f:
+    with open(tmp_path / "config.json", "w", encoding="utf-8") as f:
         json.dump(
             {
                 "milvus_uri": "https://config.example",
@@ -121,7 +121,7 @@ def test_embedding_device_defaults_to_auto(monkeypatch):
 
 def test_embedding_device_from_config_is_normalized(tmp_path, monkeypatch):
     monkeypatch.delenv("MEMPALACE_EMBEDDING_DEVICE", raising=False)
-    with open(tmp_path / "config.json", "w") as f:
+    with open(tmp_path / "config.json", "w", encoding="utf-8") as f:
         json.dump({"embedding_device": "  CUDA  "}, f)
 
     cfg = MempalaceConfig(config_dir=str(tmp_path))
@@ -129,7 +129,7 @@ def test_embedding_device_from_config_is_normalized(tmp_path, monkeypatch):
 
 
 def test_embedding_device_env_overrides_config(tmp_path, monkeypatch):
-    with open(tmp_path / "config.json", "w") as f:
+    with open(tmp_path / "config.json", "w", encoding="utf-8") as f:
         json.dump({"embedding_device": "cpu"}, f)
     monkeypatch.setenv("MEMPALACE_EMBEDDING_DEVICE", "  CoreML  ")
 
@@ -148,7 +148,7 @@ def test_embedding_threads_defaults_to_half_cpus(monkeypatch):
 def test_embedding_threads_auto_keyword(tmp_path, monkeypatch):
     monkeypatch.delenv("MEMPALACE_EMBEDDING_THREADS", raising=False)
     monkeypatch.setattr("os.cpu_count", lambda: 8)
-    with open(tmp_path / "config.json", "w") as f:
+    with open(tmp_path / "config.json", "w", encoding="utf-8") as f:
         json.dump({"embedding_threads": "auto"}, f)
     cfg = MempalaceConfig(config_dir=str(tmp_path))
     assert cfg.embedding_threads == 4
@@ -156,7 +156,7 @@ def test_embedding_threads_auto_keyword(tmp_path, monkeypatch):
 
 def test_embedding_threads_positive_value_from_config(tmp_path, monkeypatch):
     monkeypatch.delenv("MEMPALACE_EMBEDDING_THREADS", raising=False)
-    with open(tmp_path / "config.json", "w") as f:
+    with open(tmp_path / "config.json", "w", encoding="utf-8") as f:
         json.dump({"embedding_threads": 3}, f)
     cfg = MempalaceConfig(config_dir=str(tmp_path))
     assert cfg.embedding_threads == 3
@@ -164,14 +164,14 @@ def test_embedding_threads_positive_value_from_config(tmp_path, monkeypatch):
 
 def test_embedding_threads_zero_means_uncapped(tmp_path, monkeypatch):
     monkeypatch.delenv("MEMPALACE_EMBEDDING_THREADS", raising=False)
-    with open(tmp_path / "config.json", "w") as f:
+    with open(tmp_path / "config.json", "w", encoding="utf-8") as f:
         json.dump({"embedding_threads": 0}, f)
     cfg = MempalaceConfig(config_dir=str(tmp_path))
     assert cfg.embedding_threads == 0
 
 
 def test_embedding_threads_env_overrides_config(tmp_path, monkeypatch):
-    with open(tmp_path / "config.json", "w") as f:
+    with open(tmp_path / "config.json", "w", encoding="utf-8") as f:
         json.dump({"embedding_threads": 2}, f)
     monkeypatch.setenv("MEMPALACE_EMBEDDING_THREADS", "6")
     cfg = MempalaceConfig(config_dir=str(tmp_path))
@@ -274,7 +274,7 @@ def test_init():
     cfg = MempalaceConfig(config_dir=tmpdir)
     cfg.init()
     assert os.path.exists(os.path.join(tmpdir, "config.json"))
-    with open(os.path.join(tmpdir, "config.json")) as f:
+    with open(os.path.join(tmpdir, "config.json"), encoding="utf-8") as f:
         saved = json.load(f)
     assert "backend" not in saved
     assert MempalaceConfig(config_dir=tmpdir).backend == "chroma"
@@ -538,7 +538,7 @@ def test_iso_temporal_normalizes_plus_zero_offset_to_z():
 
 def _write_config(tmp_path, **values):
     """Helper: drop a config.json with the given keys into tmp_path."""
-    with open(tmp_path / "config.json", "w") as f:
+    with open(tmp_path / "config.json", "w", encoding="utf-8") as f:
         json.dump(values, f)
     return MempalaceConfig(config_dir=str(tmp_path))
 
@@ -754,7 +754,7 @@ def test_hooks_auto_save_default():
 
 def test_hooks_auto_save_from_config():
     tmpdir = tempfile.mkdtemp()
-    with open(os.path.join(tmpdir, "config.json"), "w") as f:
+    with open(os.path.join(tmpdir, "config.json"), "w", encoding="utf-8") as f:
         json.dump({"hooks": {"auto_save": False}}, f)
     cfg = MempalaceConfig(config_dir=tmpdir)
     assert cfg.hooks_auto_save is False
@@ -790,7 +790,7 @@ def test_hooks_auto_save_env_override_no():
 def test_hooks_auto_save_env_override_true():
     """Env var set to 'true' overrides config file even if config says false."""
     tmpdir = tempfile.mkdtemp()
-    with open(os.path.join(tmpdir, "config.json"), "w") as f:
+    with open(os.path.join(tmpdir, "config.json"), "w", encoding="utf-8") as f:
         json.dump({"hooks": {"auto_save": False}}, f)
     os.environ["MEMPALACE_HOOKS_AUTO_SAVE"] = "true"
     try:
@@ -808,7 +808,7 @@ def test_hook_use_daemon_default_false(monkeypatch):
 
 def test_hook_use_daemon_from_config(monkeypatch, tmp_path):
     monkeypatch.delenv("MEMPALACE_HOOKS_DAEMON", raising=False)
-    with open(tmp_path / "config.json", "w") as f:
+    with open(tmp_path / "config.json", "w", encoding="utf-8") as f:
         json.dump({"hooks": {"daemon": True}}, f)
     cfg = MempalaceConfig(config_dir=str(tmp_path))
     assert cfg.hook_use_daemon is True
@@ -816,14 +816,14 @@ def test_hook_use_daemon_from_config(monkeypatch, tmp_path):
 
 def test_hook_use_daemon_string_config(monkeypatch, tmp_path):
     monkeypatch.delenv("MEMPALACE_HOOKS_DAEMON", raising=False)
-    with open(tmp_path / "config.json", "w") as f:
+    with open(tmp_path / "config.json", "w", encoding="utf-8") as f:
         json.dump({"hooks": {"daemon": "yes"}}, f)
     cfg = MempalaceConfig(config_dir=str(tmp_path))
     assert cfg.hook_use_daemon is True
 
 
 def test_hook_use_daemon_env_override(monkeypatch, tmp_path):
-    with open(tmp_path / "config.json", "w") as f:
+    with open(tmp_path / "config.json", "w", encoding="utf-8") as f:
         json.dump({"hooks": {"daemon": False}}, f)
     monkeypatch.setenv("MEMPALACE_HOOKS_DAEMON", "yes")
     cfg = MempalaceConfig(config_dir=str(tmp_path))
@@ -841,7 +841,7 @@ def test_max_backups_default(monkeypatch):
 
 def test_max_backups_from_config(monkeypatch, tmp_path):
     monkeypatch.delenv("MEMPALACE_MAX_BACKUPS", raising=False)
-    with open(tmp_path / "config.json", "w") as f:
+    with open(tmp_path / "config.json", "w", encoding="utf-8") as f:
         json.dump({"max_backups": 3}, f)
     cfg = MempalaceConfig(config_dir=str(tmp_path))
     assert cfg.max_backups == 3
@@ -850,14 +850,14 @@ def test_max_backups_from_config(monkeypatch, tmp_path):
 def test_max_backups_zero_disables(monkeypatch, tmp_path):
     """0 is a valid, explicit "keep everything" — not garbage."""
     monkeypatch.delenv("MEMPALACE_MAX_BACKUPS", raising=False)
-    with open(tmp_path / "config.json", "w") as f:
+    with open(tmp_path / "config.json", "w", encoding="utf-8") as f:
         json.dump({"max_backups": 0}, f)
     cfg = MempalaceConfig(config_dir=str(tmp_path))
     assert cfg.max_backups == 0
 
 
 def test_max_backups_env_overrides_config(monkeypatch, tmp_path):
-    with open(tmp_path / "config.json", "w") as f:
+    with open(tmp_path / "config.json", "w", encoding="utf-8") as f:
         json.dump({"max_backups": 3}, f)
     monkeypatch.setenv("MEMPALACE_MAX_BACKUPS", "7")
     cfg = MempalaceConfig(config_dir=str(tmp_path))
@@ -867,7 +867,7 @@ def test_max_backups_env_overrides_config(monkeypatch, tmp_path):
 @pytest.mark.parametrize("bad", ["abc", "", "-5", "1.5", "true"])
 def test_max_backups_garbage_falls_back_to_default(monkeypatch, tmp_path, bad):
     """A hand-edited bad value must never crash migrate/repair."""
-    with open(tmp_path / "config.json", "w") as f:
+    with open(tmp_path / "config.json", "w", encoding="utf-8") as f:
         json.dump({"max_backups": bad}, f)
     monkeypatch.delenv("MEMPALACE_MAX_BACKUPS", raising=False)
     cfg = MempalaceConfig(config_dir=str(tmp_path))
@@ -876,14 +876,14 @@ def test_max_backups_garbage_falls_back_to_default(monkeypatch, tmp_path, bad):
 
 def test_max_backups_negative_in_config_falls_back(monkeypatch, tmp_path):
     monkeypatch.delenv("MEMPALACE_MAX_BACKUPS", raising=False)
-    with open(tmp_path / "config.json", "w") as f:
+    with open(tmp_path / "config.json", "w", encoding="utf-8") as f:
         json.dump({"max_backups": -3}, f)
     cfg = MempalaceConfig(config_dir=str(tmp_path))
     assert cfg.max_backups == 10
 
 
 def test_max_backups_bad_env_falls_back_to_config(monkeypatch, tmp_path):
-    with open(tmp_path / "config.json", "w") as f:
+    with open(tmp_path / "config.json", "w", encoding="utf-8") as f:
         json.dump({"max_backups": 4}, f)
     monkeypatch.setenv("MEMPALACE_MAX_BACKUPS", "garbage")
     cfg = MempalaceConfig(config_dir=str(tmp_path))

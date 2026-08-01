@@ -543,12 +543,10 @@ def test_gemini_jsonl_multi_block_content():
     lines = [
         json.dumps({"type": "session_metadata"}),
         json.dumps({"type": "user", "content": [{"text": "Q"}]}),
-        json.dumps(
-            {
-                "type": "gemini",
-                "content": [{"text": "First part."}, {"text": "Second part."}],
-            }
-        ),
+        json.dumps({
+            "type": "gemini",
+            "content": [{"text": "First part."}, {"text": "Second part."}],
+        }),
     ]
     result = _try_gemini_jsonl("\n".join(lines))
     assert result is not None
@@ -1518,36 +1516,32 @@ def test_claude_code_jsonl_captures_tool_output():
     """Full integration: tool_use + tool_result appear in normalized transcript."""
     lines = [
         json.dumps({"type": "human", "message": {"content": "Check the camera"}}),
-        json.dumps(
-            {
-                "type": "assistant",
-                "message": {
-                    "content": [
-                        {"type": "text", "text": "Let me check."},
-                        {
-                            "type": "tool_use",
-                            "id": "t1",
-                            "name": "Bash",
-                            "input": {"command": "lsusb | grep razer"},
-                        },
-                    ]
-                },
-            }
-        ),
-        json.dumps(
-            {
-                "type": "human",
-                "message": {
-                    "content": [
-                        {
-                            "type": "tool_result",
-                            "tool_use_id": "t1",
-                            "content": "Bus 002 Device 005: ID 1532:0e05 Razer Kiyo Pro",
-                        },
-                    ]
-                },
-            }
-        ),
+        json.dumps({
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {"type": "text", "text": "Let me check."},
+                    {
+                        "type": "tool_use",
+                        "id": "t1",
+                        "name": "Bash",
+                        "input": {"command": "lsusb | grep razer"},
+                    },
+                ]
+            },
+        }),
+        json.dumps({
+            "type": "human",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "t1",
+                        "content": "Bus 002 Device 005: ID 1532:0e05 Razer Kiyo Pro",
+                    },
+                ]
+            },
+        }),
         json.dumps({"type": "assistant", "message": {"content": "Found it."}}),
     ]
     result = _try_claude_code_jsonl("\n".join(lines))
@@ -1562,36 +1556,32 @@ def test_claude_code_jsonl_read_result_omitted():
     """Read tool results are omitted but the path breadcrumb is kept."""
     lines = [
         json.dumps({"type": "human", "message": {"content": "Show me the file"}}),
-        json.dumps(
-            {
-                "type": "assistant",
-                "message": {
-                    "content": [
-                        {"type": "text", "text": "Reading it."},
-                        {
-                            "type": "tool_use",
-                            "id": "t1",
-                            "name": "Read",
-                            "input": {"file_path": "/home/jp/file.py"},
-                        },
-                    ]
-                },
-            }
-        ),
-        json.dumps(
-            {
-                "type": "human",
-                "message": {
-                    "content": [
-                        {
-                            "type": "tool_result",
-                            "tool_use_id": "t1",
-                            "content": "entire file contents here that should not appear",
-                        },
-                    ]
-                },
-            }
-        ),
+        json.dumps({
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {"type": "text", "text": "Reading it."},
+                    {
+                        "type": "tool_use",
+                        "id": "t1",
+                        "name": "Read",
+                        "input": {"file_path": "/home/jp/file.py"},
+                    },
+                ]
+            },
+        }),
+        json.dumps({
+            "type": "human",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "t1",
+                        "content": "entire file contents here that should not appear",
+                    },
+                ]
+            },
+        }),
         json.dumps({"type": "assistant", "message": {"content": "Here it is."}}),
     ]
     result = _try_claude_code_jsonl("\n".join(lines))
@@ -1605,32 +1595,28 @@ def test_claude_code_jsonl_tool_only_user_message_not_counted():
     be added as a separate user turn with '>'."""
     lines = [
         json.dumps({"type": "human", "message": {"content": "Do it"}}),
-        json.dumps(
-            {
-                "type": "assistant",
-                "message": {
-                    "content": [
-                        {"type": "text", "text": "Running."},
-                        {
-                            "type": "tool_use",
-                            "id": "t1",
-                            "name": "Bash",
-                            "input": {"command": "echo hi"},
-                        },
-                    ]
-                },
-            }
-        ),
-        json.dumps(
-            {
-                "type": "human",
-                "message": {
-                    "content": [
-                        {"type": "tool_result", "tool_use_id": "t1", "content": "hi"},
-                    ]
-                },
-            }
-        ),
+        json.dumps({
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {"type": "text", "text": "Running."},
+                    {
+                        "type": "tool_use",
+                        "id": "t1",
+                        "name": "Bash",
+                        "input": {"command": "echo hi"},
+                    },
+                ]
+            },
+        }),
+        json.dumps({
+            "type": "human",
+            "message": {
+                "content": [
+                    {"type": "tool_result", "tool_use_id": "t1", "content": "hi"},
+                ]
+            },
+        }),
         json.dumps({"type": "assistant", "message": {"content": "Done."}}),
     ]
     result = _try_claude_code_jsonl("\n".join(lines))
@@ -1662,17 +1648,15 @@ def test_claude_code_jsonl_thinking_blocks_ignored():
     """Thinking blocks are still ignored."""
     lines = [
         json.dumps({"type": "human", "message": {"content": "Q"}}),
-        json.dumps(
-            {
-                "type": "assistant",
-                "message": {
-                    "content": [
-                        {"type": "thinking", "thinking": "", "signature": "abc"},
-                        {"type": "text", "text": "A"},
-                    ]
-                },
-            }
-        ),
+        json.dumps({
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {"type": "thinking", "thinking": "", "signature": "abc"},
+                    {"type": "text", "text": "A"},
+                ]
+            },
+        }),
     ]
     result = _try_claude_code_jsonl("\n".join(lines))
     assert result is not None
@@ -1878,15 +1862,13 @@ def test_pi_jsonl_valid_block_content():
     lines = [
         json.dumps({"type": "session", "version": "1"}),
         json.dumps({"type": "message", "message": {"role": "user", "content": "Q"}}),
-        json.dumps(
-            {
-                "type": "message",
-                "message": {
-                    "role": "assistant",
-                    "content": [{"type": "text", "text": "Assistant reply"}],
-                },
-            }
-        ),
+        json.dumps({
+            "type": "message",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "Assistant reply"}],
+            },
+        }),
     ]
     result = _try_pi_jsonl("\n".join(lines))
     assert result is not None
@@ -1920,12 +1902,10 @@ def test_pi_jsonl_skips_tool_results():
     lines = [
         json.dumps({"type": "session", "version": "1"}),
         json.dumps({"type": "message", "message": {"role": "user", "content": "Q"}}),
-        json.dumps(
-            {
-                "type": "message",
-                "message": {"role": "toolResult", "content": "tool output"},
-            }
-        ),
+        json.dumps({
+            "type": "message",
+            "message": {"role": "toolResult", "content": "tool output"},
+        }),
         json.dumps({"type": "message", "message": {"role": "assistant", "content": "A"}}),
     ]
     result = _try_pi_jsonl("\n".join(lines))

@@ -260,7 +260,7 @@ def _auto_detect(directory: str, known_people: list) -> list:
             if e["name"].lower() not in known_names and e["confidence"] >= 0.7
         ]
         return new_people
-    except Exception:
+    except Exception:  # noqa: BLE001 - best-effort auto-detect, failure returns no candidates
         return []
 
 
@@ -327,15 +327,13 @@ def _generate_aaak_bootstrap(
             code = proj[:4].upper()
             registry_lines.append(f"  {code}={proj}")
 
-    registry_lines.extend(
-        [
-            "",
-            "## AAAK Quick Reference",
-            "  Symbols: ♡=love ★=importance ⚠=warning →=relationship |=separator",
-            "  Structure: KEY:value | GROUP(details) | entity.attribute",
-            "  Read naturally — expand codes, treat *markers* as emotional context.",
-        ]
-    )
+    registry_lines.extend([
+        "",
+        "## AAAK Quick Reference",
+        "  Symbols: ♡=love ★=importance ⚠=warning →=relationship |=separator",
+        "  Structure: KEY:value | GROUP(details) | entity.attribute",
+        "  Read naturally — expand codes, treat *markers* as emotional context.",
+    ])
 
     (mempalace_dir / "aaak_entities.md").write_text("\n".join(registry_lines), encoding="utf-8")
 
@@ -374,15 +372,13 @@ def _generate_aaak_bootstrap(
             facts_lines.append(f"- **{proj}**")
         facts_lines.append("")
 
-    facts_lines.extend(
-        [
-            "## Palace",
-            f"Wings: {', '.join(wings)}",
-            f"Mode: {mode}",
-            "",
-            "*This file will be enriched by palace_facts.py after mining.*",
-        ]
-    )
+    facts_lines.extend([
+        "## Palace",
+        f"Wings: {', '.join(wings)}",
+        f"Mode: {mode}",
+        "",
+        "*This file will be enriched by palace_facts.py after mining.*",
+    ])
 
     (mempalace_dir / "critical_facts.md").write_text("\n".join(facts_lines), encoding="utf-8")
 

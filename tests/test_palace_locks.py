@@ -53,7 +53,7 @@ def _hold_lock(palace_path: str, ready_flag: str, release_flag: str) -> int:
     try:
         with mine_palace_lock(palace_path):
             # Tell the parent we hold the lock
-            open(ready_flag, "w").close()
+            open(ready_flag, "w", encoding="utf-8").close()
             # Wait until parent tells us to release
             for _ in range(500):
                 if os.path.exists(release_flag):
@@ -147,7 +147,7 @@ def test_same_palace_serializes_across_processes(tmp_path, monkeypatch):
             with mine_palace_lock(palace):
                 pytest.fail("second acquire of same palace should have raised")
     finally:
-        open(release, "w").close()
+        open(release, "w", encoding="utf-8").close()
         holder.join(timeout=5)
         assert holder.exitcode == 0
 
@@ -174,7 +174,7 @@ def test_different_palaces_dont_conflict(tmp_path, monkeypatch):
         with mine_palace_lock(palace_b):
             pass  # no exception expected
     finally:
-        open(release, "w").close()
+        open(release, "w", encoding="utf-8").close()
         holder.join(timeout=5)
 
 
@@ -212,7 +212,7 @@ def test_palace_path_is_normalized(tmp_path, monkeypatch):
             with mine_palace_lock("palace"):
                 pytest.fail("normalized path collision should have raised")
     finally:
-        open(release, "w").close()
+        open(release, "w", encoding="utf-8").close()
         holder.join(timeout=5)
 
 
@@ -266,7 +266,7 @@ def _hold_lock_send_pid(palace_path: str, ready_flag: str, release_flag: str, pi
     try:
         with mine_palace_lock(palace_path):
             pid_q.put((os.getpid(), list(_sys.argv[:3])))
-            open(ready_flag, "w").close()
+            open(ready_flag, "w", encoding="utf-8").close()
             for _ in range(500):
                 if os.path.exists(release_flag):
                     return
@@ -311,7 +311,7 @@ def test_lock_failure_message_names_holder(tmp_path, monkeypatch):
             f"lock-failure message must name the holder PID; got: {msg!r}"
         )
     finally:
-        open(release, "w").close()
+        open(release, "w", encoding="utf-8").close()
         holder.join(timeout=5)
 
 

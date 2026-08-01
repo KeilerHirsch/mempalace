@@ -283,7 +283,7 @@ def test_migrate_cleans_temp_palace_on_chromadb_failure(tmp_path):
     ):
         try:
             migrate(str(palace_dir), confirm=True)
-        except Exception:
+        except Exception:  # noqa: BLE001 - expected failure, only side effects matter
             pass
 
     assert captured_temp_paths, "mkdtemp was never called — flow short-circuited"
@@ -329,7 +329,7 @@ def test_migrate_prunes_old_pre_migrate_backups(tmp_path, monkeypatch):
     ):
         try:
             migrate(str(palace_dir), confirm=True)
-        except Exception:
+        except Exception:  # noqa: BLE001 - expected failure, only side effects matter
             pass
 
     backups = sorted(p.name for p in tmp_path.glob("palace.pre-migrate.*"))

@@ -114,20 +114,18 @@ class TestSweeperParsing:
         big_input = {"diff": "x" * 5000}  # well past the old 500-char cap
         path = tmp_path / "session_tools.jsonl"
         path.write_text(
-            _json.dumps(
-                {
-                    "type": "assistant",
-                    "timestamp": "2026-04-18T10:00:00Z",
-                    "sessionId": "tools-1",
-                    "uuid": "a-tool",
-                    "message": {
-                        "role": "assistant",
-                        "content": [
-                            {"type": "tool_use", "name": "Edit", "input": big_input},
-                        ],
-                    },
-                }
-            )
+            _json.dumps({
+                "type": "assistant",
+                "timestamp": "2026-04-18T10:00:00Z",
+                "sessionId": "tools-1",
+                "uuid": "a-tool",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {"type": "tool_use", "name": "Edit", "input": big_input},
+                    ],
+                },
+            })
             + "\n"
         )
 
@@ -214,7 +212,7 @@ class TestSweeperTandem:
                 "message": {"role": "assistant", "content": [{"type": "text", "text": "two"}]},
             },
         ]
-        with open(jsonl_path, "a") as f:
+        with open(jsonl_path, "a", encoding="utf-8") as f:
             for x in more_lines:
                 f.write(json.dumps(x) + "\n")
 

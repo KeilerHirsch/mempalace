@@ -554,7 +554,7 @@ def test_qdrant_live_rest_roundtrip_when_enabled(tmp_path):
     finally:
         try:
             col._client.delete_collection(col._remote_collection)
-        except Exception:
+        except Exception:  # noqa: BLE001 - best-effort collection delete in teardown
             pass
         backend.close()
 

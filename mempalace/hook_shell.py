@@ -78,7 +78,7 @@ def count_human_messages(path: str) -> int:
         for line in fh:
             try:
                 entry = json.loads(line)
-            except Exception:
+            except Exception:  # noqa: BLE001 - malformed line skipped, feeds cosmetic count only
                 continue
 
             msg = entry.get("message", {})
@@ -147,7 +147,7 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         try:
             print(count_human_messages(argv[1]))
-        except Exception:
+        except Exception:  # noqa: BLE001 - CLI wrapper, any failure surfaces as printed "0"
             print(0)
         return 0
 

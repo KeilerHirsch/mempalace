@@ -190,7 +190,7 @@ def _http_post_json(url: str, body: dict, headers: dict, timeout: int) -> dict:
         detail = ""
         try:
             detail = e.read().decode("utf-8", errors="replace")[:500]
-        except Exception:
+        except Exception:  # noqa: BLE001 - best-effort error body extraction, outer raise still fires
             pass
         raise LLMError(f"HTTP {e.code} from {url}: {detail or e.reason}") from e
     except (URLError, OSError) as e:

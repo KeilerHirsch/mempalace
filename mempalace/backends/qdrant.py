@@ -68,9 +68,19 @@ _TOKEN_RE = re.compile(r"\w{2,}", re.UNICODE)
 # trade-off, not a metadata-only optimization. (Noted in maintainer review
 # on #1832.)
 _SCROLL_PAGE_SIZE = 4096
-_SUPPORTED_OPERATORS = frozenset(
-    {"$eq", "$ne", "$in", "$nin", "$and", "$or", "$contains", "$gt", "$gte", "$lt", "$lte"}
-)
+_SUPPORTED_OPERATORS = frozenset({
+    "$eq",
+    "$ne",
+    "$in",
+    "$nin",
+    "$and",
+    "$or",
+    "$contains",
+    "$gt",
+    "$gte",
+    "$lt",
+    "$lte",
+})
 
 
 def _utcnow() -> str:
@@ -329,7 +339,7 @@ class _QdrantConfig:
             from ..config import MempalaceConfig
 
             cfg = MempalaceConfig()
-        except Exception:  # pragma: no cover - config import should be boring
+        except Exception:  # noqa: BLE001 - pragma: no cover - identical config-loader pattern
             cfg = None
         url = (
             options.get("url")
@@ -841,18 +851,16 @@ class QdrantCollection(BaseCollection):
         metadatas = metadatas or [{} for _ in ids]
         points = []
         for doc_id, doc, meta, vector in zip(ids, documents, metadatas, vectors):
-            points.append(
-                {
-                    "id": _point_id(doc_id),
-                    "vector": vector,
-                    "payload": {
-                        _PAYLOAD_ID: str(doc_id),
-                        _PAYLOAD_DOCUMENT: str(doc),
-                        _PAYLOAD_METADATA: _jsonable_metadata(meta),
-                        "updated_at": _utcnow(),
-                    },
-                }
-            )
+            points.append({
+                "id": _point_id(doc_id),
+                "vector": vector,
+                "payload": {
+                    _PAYLOAD_ID: str(doc_id),
+                    _PAYLOAD_DOCUMENT: str(doc),
+                    _PAYLOAD_METADATA: _jsonable_metadata(meta),
+                    "updated_at": _utcnow(),
+                },
+            })
         self._client.upsert_points(self._remote_collection, points)
         self._backend._write_marker(self._palace, self._config)
 
@@ -1178,19 +1186,17 @@ class QdrantCollection(BaseCollection):
 
 class QdrantBackend(BaseBackend):
     name = "qdrant"
-    capabilities = frozenset(
-        {
-            "requires_explicit_embeddings",
-            "supports_embeddings_in",
-            "supports_embeddings_passthrough",
-            "supports_embeddings_out",
-            "supports_metadata_filters",
-            "supports_lexical_search",
-            "supports_metadata_facets",
-            "supports_namespace_isolation",
-            "server_mode",
-        }
-    )
+    capabilities = frozenset({
+        "requires_explicit_embeddings",
+        "supports_embeddings_in",
+        "supports_embeddings_passthrough",
+        "supports_embeddings_out",
+        "supports_metadata_filters",
+        "supports_lexical_search",
+        "supports_metadata_facets",
+        "supports_namespace_isolation",
+        "server_mode",
+    })
 
     def __init__(self):
         self._clients: dict[_QdrantConfig, _QdrantRESTClient] = {}
