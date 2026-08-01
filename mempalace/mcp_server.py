@@ -471,7 +471,19 @@ def _mcp_peer_writer_refusal(req_id, tool_name: str):
         return None
 
     ok, reason = _acquire_mcp_writer_lock()
-    if ok:
+
+    # ok=True with _MCP_WRITER_LOCK_FAILED set is the "fail-open" state: the
+    # lock *mechanism* itself errored (e.g. an msvcrt.locking OSError on
+    # Windows, where file locking is more fragile than POSIX flock), so the
+    # server kept running to stay available for reads. But a mutating write in
+    # that state runs with NO peer-writer lock — a concurrent `mempalace mine`
+    # can then race chromadb's non-process-safe HNSW persist and silently drop
+    # index entries (SQLite stays intact, so the loss is invisible until a
+    # divergence check runs). Refuse mutating tools while fail-open (unless the
+    # operator explicitly opts into unprotected writes) so writes fail closed
+    # instead of diverging the index in silence. Reads and status stay allowed.
+    fail_open = ok and _MCP_WRITER_LOCK_FAILED and not _truthy_env(_MCP_ALLOW_PEER_WRITER_ENV)
+    if ok and not fail_open:
         return None
 
     return {
