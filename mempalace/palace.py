@@ -945,12 +945,19 @@ def _validate_palace_fts5_after_mine(palace_path: str) -> None:
     Reuses the same primitive that `cmd_repair` already runs as preflight so the
     operator sees the same recovery banner regardless of which command surfaces
     the bug.
+
+    An isolated FTS5 inverted-index corruption (the common case after a
+    killed-mid-write mine, #1596) is auto-healed in place first via the same
+    `maybe_autoheal_fts5_index` rebuild `cmd_repair` already runs as its own
+    preflight step — so a normal `mine` self-heals the recoverable case
+    instead of forcing the operator to run `mempalace repair` by hand for a
+    derived index that regenerates from intact content.
     """
     if resolve_backend_name(palace_path) != "chroma":
         return
 
     # Defer-import: keeps the repair module graph out of mine's hot import path.
-    from .repair import _close_chroma_handles, sqlite_integrity_errors
+    from .repair import _close_chroma_handles, maybe_autoheal_fts5_index, sqlite_integrity_errors
 
     # Pass the live singleton so the writer's cached PersistentClient actually
     # gets closed and WAL flushes before the read-only sqlite3 re-open.
@@ -960,6 +967,12 @@ def _validate_palace_fts5_after_mine(palace_path: str) -> None:
     _close_chroma_handles(palace_path, backend=_DEFAULT_BACKEND)
 
     errors = sqlite_integrity_errors(palace_path)
+    if errors:
+        # progress=logger.info, not the default print: this runs inside the
+        # MCP server process too (mcp_server.tool_mine -> miner.mine), where
+        # stdout is the JSON-RPC transport -- a stray print() here would
+        # corrupt the protocol stream and crash the connection.
+        errors = maybe_autoheal_fts5_index(palace_path, errors, progress=logger.info)
     if errors:
         raise MineValidationError(palace_path, errors)
 
@@ -1182,8 +1195,14 @@ def mine_palace_lock(palace_path: str):
                 ) from exc
         # Record our own identity for any later contender's diagnostic message.
         _write_lock_holder(lf)
-        _mark_held(palace_key)
+        # Mark the hold from inside the try so it always pairs with
+        # _mark_released. If it sat before the try, an async exception
+        # (a SIGINT/KeyboardInterrupt) landing in the gap would orphan
+        # palace_key in the holder set while the outer finally frees the
+        # flock, so the in-memory hold would outlive the OS lock and a later
+        # re-entrant acquire would pass through and write without the flock.
         try:
+            _mark_held(palace_key)
             yield
         finally:
             _mark_released(palace_key)

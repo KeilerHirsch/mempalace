@@ -1780,6 +1780,34 @@ def test_cmd_repair_from_sqlite_success_does_not_exit(mock_config_cls, tmp_path)
 
 
 @patch("mempalace.cli.MempalaceConfig")
+def test_cmd_repair_from_sqlite_cleanup_failure_exits_nonzero(mock_config_cls, tmp_path, capsys):
+    from mempalace.repair import RebuildCleanupError
+
+    palace_dir = tmp_path / "palace"
+    source_dir = tmp_path / "source"
+    mock_config_cls.return_value.palace_path = str(palace_dir)
+    args = argparse.Namespace(
+        palace=str(palace_dir),
+        mode="from-sqlite",
+        source=str(source_dir),
+        archive_existing=False,
+        yes=True,
+    )
+    failure = RebuildCleanupError(
+        "cleanup failed",
+        counts={"mempalace_drawers": 1},
+        dest_palace=str(palace_dir),
+        archive_path=None,
+    )
+    with patch("mempalace.repair.rebuild_from_sqlite", side_effect=failure):
+        with pytest.raises(SystemExit) as excinfo:
+            cmd_repair(args)
+
+    assert excinfo.value.code == 1
+    assert "Rebuild cleanup failed" in capsys.readouterr().out
+
+
+@patch("mempalace.cli.MempalaceConfig")
 def test_cmd_repair_rebuild_index_alias_uses_sqlite_archive(mock_config_cls, tmp_path):
     """``repair rebuild-index`` must bypass Chroma reads and rebuild from SQLite."""
     palace_dir = tmp_path / "palace"

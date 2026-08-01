@@ -1,6 +1,6 @@
 # MCP Tools Reference
 
-Detailed parameter schemas for all 35 MCP tools.
+Detailed parameter schemas for all 36 MCP tools.
 
 ## Palace — Read Tools
 
@@ -111,6 +111,7 @@ Save a whole session in one call. Semantic-dedups each item, files the non-dupli
 | `items` | array | **Yes** | Verbatim items to file. Each is `{ wing, room, content }` |
 | `diary` | object | No | Diary entry written after filing: `{ agent_name, entry, topic?, wing? }` (`entry` is AAAK-format) |
 | `dedup_threshold` | number | No | Similarity threshold 0–1 for the per-item dedup check (default 0.9) |
+| `added_by` | string | No | Who is filing these drawers. An explicit value takes precedence; otherwise the diary `agent_name`, else `checkpoint` |
 
 **Returns:** `{ added: [...], duplicates: [...], errors: [...], diary? }`
 

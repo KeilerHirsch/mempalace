@@ -969,6 +969,112 @@ def _spark_guard_check_consistency(
         return None
 
 
+# Probe verdicts keyed by ``(palace_path, collection_name)``; each value is
+# ``(fingerprint, segment_id, status, probed_at)``. Written as one tuple
+# assignment, so a concurrent reader either sees the previous entry or the new
+# one, never a half-updated pair. Two threads that miss together simply both
+# run the probe and the last writer wins — a benign race, and cheaper than
+# serializing every reader behind a lock.
+_capacity_cache: dict[tuple[str, str], tuple[tuple, Optional[str], dict, float]] = {}
+
+# Bumped by every :func:`reset_hnsw_capacity_cache`. A probe reads it before
+# running and refuses to store its verdict if it changed meanwhile, so a probe
+# already in flight when a reset lands cannot repopulate the entry the reset
+# was meant to discard (the ``tool_reconnect`` race).
+_capacity_cache_generation = 0
+
+# A long-lived server watches one palace and a handful of collections, so the
+# map stays tiny; the bound only exists so a process that walks many palaces
+# (benchmarks, batch tooling) cannot grow it without limit.
+_CAPACITY_CACHE_MAX_ENTRIES = 32
+
+# Ceiling on how long one verdict may be reused, as a backstop for filesystems
+# whose timestamps are too coarse to notice a quick rewrite: FAT32 stores mtime
+# at 2 s granularity, exFAT at 10 ms, and a write that lands inside existing
+# sqlite pages need not change the file size either. On ext4/APFS/NTFS the
+# signature already catches every write, so this ceiling never fires in
+# practice. It bounds the worst case; it is not the freshness mechanism.
+_CAPACITY_CACHE_MAX_AGE_SECONDS = 10.0
+
+
+def _stat_signature(path: str) -> tuple[int, int, int]:
+    """Return ``(inode, mtime_ns, size)`` for ``path``, all zeros when absent.
+
+    Catches every exception, not just ``OSError``: a palace path carrying an
+    embedded null byte makes ``os.stat`` raise ``ValueError``, and
+    :func:`hnsw_capacity_status` promises never to raise. An unreadable path
+    simply yields the "absent" signature and the probe reports ``unknown``.
+    """
+    try:
+        st = os.stat(path)
+    except Exception:  # noqa: BLE001 - docstring: catches ValueError (null byte) too, not just OSError
+        return (0, 0, 0)
+    return (st.st_ino, st.st_mtime_ns, st.st_size)
+
+
+def _db_family_signature(palace_path: str) -> tuple:
+    """Signature of the sqlite files whose contents the probe depends on.
+
+    chromadb 1.5.x leaves ``chroma.sqlite3`` in ``journal_mode=delete``, so the
+    ``-wal`` sidecar usually does not exist and stat'ing it is one cheap miss.
+    It is covered anyway because the journal mode belongs to the database
+    rather than to this code: under WAL a writer appends rows the probe would
+    count while the main file's own mtime stays put, and the verdict would
+    otherwise be reused against data it never saw.
+
+    ``-shm`` is deliberately excluded. It is the WAL index in shared memory,
+    and sqlite restamps it every time a connection opens the database — even
+    read-only. Including it would make the probe invalidate its own cache on
+    every call, so on a WAL-mode palace the cache would never hit.
+    """
+    db_path = os.path.join(palace_path, "chroma.sqlite3")
+    return (
+        _stat_signature(db_path),
+        _stat_signature(db_path + "-wal"),
+    )
+
+
+def _pickle_signature(palace_path: str, segment_id: Optional[str]) -> tuple[int, int, int]:
+    """Signature of the segment's ``index_metadata.pickle``."""
+    if not segment_id:
+        return (0, 0, 0)
+    return _stat_signature(os.path.join(palace_path, segment_id, "index_metadata.pickle"))
+
+
+def _segment_id_safe(palace_path: str, collection_name: str) -> Optional[str]:
+    """``_vector_segment_id`` that never raises, for the pre-probe signature."""
+    try:
+        return _vector_segment_id(palace_path, collection_name)
+    except Exception:  # noqa: BLE001 - docstring: "never raises" for the pre-probe signature
+        return None
+
+
+def _capacity_fingerprint(palace_path: str, segment_id: Optional[str]) -> tuple:
+    """Signature over every file the probe reads: the sqlite family + the pickle.
+
+    Both halves must be captured for the same ``segment_id`` so a rewrite of
+    ``index_metadata.pickle`` is caught. The probe reads that pickle partway
+    through, then makes two more sqlite calls, so a signature taken only after
+    the probe returned would record a mid-probe pickle rewrite as "unchanged"
+    while the verdict still reflected the pre-write file (#1471 review).
+    """
+    return (_db_family_signature(palace_path), _pickle_signature(palace_path, segment_id))
+
+
+def reset_hnsw_capacity_cache() -> None:
+    """Forget every cached capacity verdict.
+
+    The signature check already picks up on-disk changes on its own; this is
+    for callers that drop all cached palace state at once (``tool_reconnect``,
+    ``_force_chroma_cache_reset``) and for tests that want a probe to run
+    unconditionally. Bumps the generation so a probe already running cannot
+    re-store the entry this call just dropped.
+    """
+    global _capacity_cache_generation
+    _capacity_cache_generation += 1
+    _capacity_cache.clear()
+
+
 def hnsw_capacity_status(
     palace_path: str,
     collection_name: str = "mempalace_drawers",
@@ -1013,7 +1119,77 @@ def hnsw_capacity_status(
     from a startup or per-request hot path.
 
     Never raises — a probe that throws would defeat the point.
+
+    A fully-measured verdict is cached per ``(palace_path, collection_name)``
+    and reused while every file the probe reads is unchanged on disk (#1471).
+    Each call otherwise costs a ``COUNT(*)`` over the embeddings table and a
+    full unpickle of the segment metadata — the two dominant costs — plus a few
+    small sqlite reads, on a path every search, duplicate check and status call
+    runs through. A verdict the probe could not fully measure (``sqlite_count``
+    is ``None`` from a locked database, or there is no palace yet) is returned
+    but never cached, so a transient failure cannot pin a false reading.
+
+    Freshness comes from an ``(inode, mtime_ns, size)`` signature rather than a
+    wall-clock TTL, so an external writer — ``mempalace repair``, a peer mine,
+    another process — invalidates the verdict as soon as it touches the files,
+    instead of leaving the #1222 guard blind for a fixed window.
+    ``_CAPACITY_CACHE_MAX_AGE_SECONDS`` caps how long one verdict may be
+    reused, but only as a backstop for filesystems with coarse timestamps; the
+    signature is what makes the verdict fresh.
+
+    Unlike :meth:`ChromaBackend._client`, which tolerates a 0.01 s mtime
+    epsilon to avoid rebuilding an expensive client, this compares exactly:
+    re-running the probe costs milliseconds, whereas serving one stale verdict
+    can route a query into a diverged segment.
     """
+    # include_consistency_check is part of the cache key: a cached verdict
+    # computed without the SPARK guard (the common, fast, boot-path case)
+    # must never be handed back to a caller that explicitly opted into the
+    # expensive check, or vice versa — either direction would silently
+    # return the wrong shape of result (missing or stale `consistency`).
+    key = (palace_path, collection_name, include_consistency_check)
+    cached = _capacity_cache.get(key)
+    if cached is not None:
+        fingerprint, cached_segment, status, probed_at = cached
+        if time.monotonic() - probed_at <= _CAPACITY_CACHE_MAX_AGE_SECONDS:
+            if _capacity_fingerprint(palace_path, cached_segment) == fingerprint:
+                return dict(status)
+
+    generation = _capacity_cache_generation
+    # Snapshot the files the probe is about to read, before it reads them, and
+    # again after — using the segment id the probe itself resolved. Caching
+    # only when both snapshots agree makes an external write during the probe
+    # (sqlite OR the pickle) fall through uncached rather than pin a verdict
+    # the disk no longer supports.
+    before = _capacity_fingerprint(palace_path, _segment_id_safe(palace_path, collection_name))
+    out = _hnsw_capacity_status_uncached(palace_path, collection_name, include_consistency_check)
+    segment_id = out.get("segment_id")
+    after = _capacity_fingerprint(palace_path, segment_id)
+    cacheable = (
+        before == after
+        # A None sqlite_count means the probe could not read the database
+        # (transient lock/error), not a real "unknown" — pinning it would go
+        # blind for the whole ceiling. A None segment id has no pickle path to
+        # watch, so its fingerprint can never notice a first flush.
+        and out.get("sqlite_count") is not None
+        and segment_id is not None
+        # A reset that landed while this probe ran already dropped the entry
+        # it was told to; do not resurrect it.
+        and generation == _capacity_cache_generation
+    )
+    if cacheable:
+        if len(_capacity_cache) >= _CAPACITY_CACHE_MAX_ENTRIES:
+            _capacity_cache.clear()
+        _capacity_cache[key] = (after, segment_id, dict(out), time.monotonic())
+    return out
+
+
+def _hnsw_capacity_status_uncached(
+    palace_path: str,
+    collection_name: str = "mempalace_drawers",
+    include_consistency_check: bool = False,
+) -> dict:
+    """Run the capacity probe, bypassing the cache. See :func:`hnsw_capacity_status`."""
     out: dict[str, Any] = {
         "segment_id": None,
         "sqlite_count": None,

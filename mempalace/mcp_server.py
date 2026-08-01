@@ -74,6 +74,7 @@ from .backends.chroma import (  # noqa: E402
     _HNSW_BLOAT_GUARD,
     _pin_hnsw_threads,
     hnsw_capacity_status,
+    reset_hnsw_capacity_cache,
 )
 from .backends import BackendMismatchError, PalaceRef, detect_backend_for_path  # noqa: E402
 from .query_sanitizer import sanitize_query  # noqa: E402
@@ -864,6 +865,12 @@ def _force_chroma_cache_reset() -> None:
     _palace_db_mtime = 0.0
     _metadata_cache = None
     _metadata_cache_time = 0
+    # This runs on the #1315 retry path, which drops caches precisely to
+    # re-observe the palace after a transient index error. The capacity verdict
+    # is another cached view of that same palace, so it must be dropped too, or
+    # the retry could be answered from the pre-error verdict (its 10 s ceiling
+    # outlasts the 2 s retry sleep).
+    reset_hnsw_capacity_cache()
     try:
         from .palace import get_backend_for_palace
 
@@ -3845,7 +3852,10 @@ def tool_reconnect():
     ChromaBackend._quarantined_paths.discard(_config.palace_path)
     # Force probe re-run on next _get_client by clearing the flag now;
     # _refresh_vector_disabled_flag will re-set it if the divergence
-    # still applies after the reconnect.
+    # still applies after the reconnect. The probe keeps its own cache
+    # (#1471), so drop that too — otherwise the "re-run" would be served
+    # from the verdict this reconnect is meant to discard.
+    reset_hnsw_capacity_cache()
     _vector_disabled = False
     _vector_disabled_reason = ""
     # Drain the per-path KnowledgeGraph cache so a replaced sqlite file is
@@ -3918,7 +3928,7 @@ def tool_reconnect():
         return {"success": False, "error": str(e)}
 
 
-def tool_checkpoint(items, diary=None, dedup_threshold=0.9):
+def tool_checkpoint(items, diary=None, dedup_threshold=0.9, added_by=None):
     """Batch session save in a single call.
 
     Semantic-dedups each item, files the non-duplicates as drawers, then
@@ -3929,6 +3939,9 @@ def tool_checkpoint(items, diary=None, dedup_threshold=0.9):
 
     ``items`` is a list of ``{"wing", "room", "content"}`` dicts. ``diary``
     is an optional ``{"agent_name", "entry", "topic"?, "wing"?}`` dict.
+    ``added_by`` attributes the filed drawers; when omitted it falls back to
+    the diary's ``agent_name`` (and then to ``"checkpoint"``), so the agent
+    that filed the session is recorded instead of a generic label.
     Reuses the existing single-item handlers so dedup/idempotency/WAL
     behaviour is identical to calling them directly.
     """
@@ -3945,6 +3958,20 @@ def tool_checkpoint(items, diary=None, dedup_threshold=0.9):
     out = {"added": [], "duplicates": [], "errors": []}
     if not isinstance(items, list):
         return {"error": "items must be a list of {wing, room, content} objects"}
+    # Drawer attribution: an explicit ``added_by`` wins; otherwise fall back to
+    # the diary's ``agent_name`` (the agent filing this session); otherwise the
+    # legacy ``"checkpoint"`` label. A blank, whitespace-only, or non-string
+    # value counts as unspecified at each step, so an empty explicit argument
+    # still defers to the diary instead of masking it. The chosen name is stored
+    # verbatim (tool_add_drawer strips lone surrogates but does not case-fold),
+    # matching how every other caller records ``added_by``; the diary index
+    # lowercases the same name separately for case-insensitive reads.
+    resolved_added_by = added_by if isinstance(added_by, str) and added_by.strip() else None
+    if resolved_added_by is None and isinstance(diary, dict):
+        agent = diary.get("agent_name")
+        resolved_added_by = agent if isinstance(agent, str) and agent.strip() else None
+    if resolved_added_by is None:
+        resolved_added_by = "checkpoint"
     for item in items:
         if not isinstance(item, dict):
             out["errors"].append({"item": item, "error": "item must be an object"})
@@ -3968,7 +3995,7 @@ def tool_checkpoint(items, diary=None, dedup_threshold=0.9):
         # string by the guard above) we still file rather than drop the
         # memory: verbatim recall is the priority and add_drawer's own
         # idempotency blocks exact duplicates.
-        res = tool_add_drawer(wing=wing, room=room, content=content, added_by="checkpoint")
+        res = tool_add_drawer(wing=wing, room=room, content=content, added_by=resolved_added_by)
         if res.get("success"):
             out["added"].append(res)
         else:
@@ -4373,6 +4400,10 @@ TOOLS = {
                 "dedup_threshold": {
                     "type": "number",
                     "description": "Similarity threshold 0-1 for the per-item dedup check (default 0.9)",
+                },
+                "added_by": {
+                    "type": "string",
+                    "description": "Who is filing these drawers. An explicit value takes precedence; otherwise the diary agent_name, else 'checkpoint'.",
                 },
             },
             "required": ["items"],
@@ -5226,6 +5257,28 @@ def _build_http_server(host: str, port: int):
     class _MCPHTTPServer(ThreadingHTTPServer):
         daemon_threads = True
         allow_reuse_address = True
+
+        def handle_error(self, request, client_address):
+            # A client hanging up mid-response makes the send path raise
+            # ConnectionError (BrokenPipeError / ConnectionResetError), or
+            # ssl.SSLEOFError over TLS. That is a routine disconnect, not a
+            # server fault, so log it at DEBUG rather than let the default
+            # handler dump a per-request traceback. Real errors (including
+            # genuine TLS handshake/cert failures) still reach that handler.
+            exc = sys.exc_info()[1]
+            is_disconnect = isinstance(exc, ConnectionError)
+            if not is_disconnect:
+                import ssl
+
+                # Only the abrupt-EOF SSLError; genuine TLS errors must surface.
+                is_disconnect = isinstance(exc, ssl.SSLEOFError)
+            if is_disconnect:
+                logger.debug(
+                    "HTTP client %s disconnected before the response completed",
+                    client_address,
+                )
+                return
+            super().handle_error(request, client_address)
 
     class _Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"

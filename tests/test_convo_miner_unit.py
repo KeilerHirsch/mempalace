@@ -363,6 +363,30 @@ class TestScanConvos:
         files = scan_convos(str(tmp_path))
         assert files == []
 
+    def test_scan_skips_tool_results_dirs(self, tmp_path):
+        # Claude Code pages large tool outputs to <session>/tool-results/*.txt
+        # inside ~/.claude/projects/<slug>/. These are raw machine dumps
+        # referenced from the transcript JSONL, not conversations — mining
+        # them floods the palace (12.8k drawers measured in the field, one
+        # single file produced 3.6k). The scanner must not descend into them.
+        session_dir = tmp_path / "1234-5678-session"
+        tool_results = session_dir / "tool-results"
+        tool_results.mkdir(parents=True)
+        (tool_results / "bipc8jdx0.txt").write_text("raw tool dump " * 100, encoding="utf-8")
+        (tmp_path / "session.jsonl").write_text('{"type": "user"}', encoding="utf-8")
+        files = scan_convos(str(tmp_path))
+        names = [f.name for f in files]
+        assert "session.jsonl" in names
+        assert "bipc8jdx0.txt" not in names
+
+    def test_scan_keeps_regular_nested_dirs(self, tmp_path):
+        # The tool-results skip must not turn into a blanket nested-dir skip.
+        nested = tmp_path / "archive"
+        nested.mkdir()
+        (nested / "old-chat.md").write_text("> q\na\n> q2\na2\n> q3\na3", encoding="utf-8")
+        files = scan_convos(str(tmp_path))
+        assert [f.name for f in files] == ["old-chat.md"]
+
     @pytest.mark.skipif(
         sys.platform == "win32",
         reason="symlink creation requires elevated privileges on Windows",

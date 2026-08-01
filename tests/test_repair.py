@@ -1399,6 +1399,57 @@ def test_sqlite_integrity_errors_returns_empty_for_healthy_db(tmp_path):
     assert repair.sqlite_integrity_errors(str(palace)) == []
 
 
+def test_sqlite_integrity_errors_uses_bounded_contention_timeout(tmp_path, monkeypatch):
+    """Integrity checks wait out routine writers without a real-time sleep.
+
+    Assert the sqlite connection contract directly so this regression test is
+    deterministic and does not add the seven-second delay from the original
+    proposal to every test run.
+    """
+    palace = tmp_path / "palace"
+    palace.mkdir()
+    db_path = palace / "chroma.sqlite3"
+    db_path.touch()
+
+    calls = []
+
+    class _Result:
+        @staticmethod
+        def fetchall():
+            return [("ok",)]
+
+    class _Connection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def execute(self, statement):
+            calls.append(("execute", statement))
+            return _Result()
+
+    def _connect(database, **kwargs):
+        calls.append(("connect", database, kwargs))
+        return _Connection()
+
+    monkeypatch.setattr(repair.sqlite3, "connect", _connect)
+
+    assert repair.sqlite_integrity_errors(str(palace)) == []
+    assert calls == [
+        (
+            "connect",
+            repair.sqlite_read_uri(str(db_path)),
+            {
+                "uri": True,
+                "timeout": repair._SQLITE_INTEGRITY_BUSY_TIMEOUT_SECONDS,
+            },
+        ),
+        ("execute", "PRAGMA quick_check"),
+    ]
+    assert repair._SQLITE_INTEGRITY_BUSY_TIMEOUT_SECONDS == 15.0
+
+
 def test_sqlite_integrity_errors_reports_unreadable_sqlite_file(tmp_path):
     palace = tmp_path / "palace"
     palace.mkdir()
@@ -1880,6 +1931,60 @@ def test_rebuild_from_sqlite_roundtrips_via_real_chromadb(tmp_path):
     assert closet_row["metadatas"][0] == {"wing": "alpha"}
 
 
+def test_rebuild_from_sqlite_rebuilds_fts5_after_chroma_closes(tmp_path, monkeypatch):
+    """The SQLite recovery path must finish by rebuilding Chroma's FTS5 index.
+
+    Large bulk upserts can leave the derived full-text index malformed even
+    when every source drawer survived.  The repair is not complete until the
+    Chroma client releases its SQLite handle and FTS5 is rebuilt.
+    """
+    source = tmp_path / "source"
+    dest = tmp_path / "dest"
+    _seed_palace(source, "mempalace_drawers", [("d1", "doc", {"wing": "w"})])
+
+    calls = []
+    real_rebuild = repair._vacuum_and_rebuild_fts5
+
+    def _spy(path, progress=print, *, strict=False):
+        calls.append((path, strict))
+        return real_rebuild(path, progress=progress, strict=strict)
+
+    monkeypatch.setattr(repair, "_vacuum_and_rebuild_fts5", _spy)
+
+    counts = repair.rebuild_from_sqlite(str(source), str(dest))
+
+    assert counts["mempalace_drawers"] == 1
+    assert calls == [(str(dest), True)]
+
+
+def test_rebuild_from_sqlite_cleanup_failure_is_not_reported_as_success(
+    tmp_path, monkeypatch, capsys
+):
+    source = tmp_path / "source"
+    dest = tmp_path / "dest"
+    _seed_palace(source, "mempalace_drawers", [("d1", "verbatim", {"wing": "w"})])
+
+    def _fail_cleanup(path, progress=print, *, strict=False):
+        assert path == str(dest)
+        assert strict is True
+        raise RuntimeError("simulated FTS5 rebuild failure")
+
+    monkeypatch.setattr(repair, "_vacuum_and_rebuild_fts5", _fail_cleanup)
+
+    with pytest.raises(repair.RebuildCleanupError) as excinfo:
+        repair.rebuild_from_sqlite(str(source), str(dest))
+
+    exc = excinfo.value
+    assert exc.counts["mempalace_drawers"] == 1
+    assert exc.dest_palace == str(dest)
+    assert exc.archive_path is None
+    assert dest.exists()
+    assert (source / "chroma.sqlite3").exists()
+    output = capsys.readouterr().out
+    assert "Rebuild complete" not in output
+    assert "Post-recovery cleanup failed" in output
+
+
 def test_rebuild_from_sqlite_refuses_existing_dest(tmp_path):
     """Refuse to write into a directory that already exists when source
     and dest differ. Without this, an unattended re-run would silently
@@ -2154,6 +2259,27 @@ def test_vacuum_and_rebuild_fts5_missing_sqlite(tmp_path):
     repair._vacuum_and_rebuild_fts5(str(tmp_path))  # no file — must not raise
 
 
+def test_vacuum_and_rebuild_fts5_strict_requires_sqlite(tmp_path):
+    with pytest.raises(FileNotFoundError, match="has no SQLite database"):
+        repair._vacuum_and_rebuild_fts5(str(tmp_path), strict=True)
+
+
+def test_vacuum_and_rebuild_fts5_strict_preserves_exception_type(tmp_path, monkeypatch):
+    sqlite_path = tmp_path / "chroma.sqlite3"
+    sqlite_path.touch()
+    messages = []
+
+    def _raise_database_error(*args, **kwargs):
+        raise sqlite3.DatabaseError("simulated cleanup failure")
+
+    monkeypatch.setattr(repair.sqlite3, "connect", _raise_database_error)
+
+    with pytest.raises(sqlite3.DatabaseError, match="simulated cleanup failure"):
+        repair._vacuum_and_rebuild_fts5(str(tmp_path), progress=messages.append, strict=True)
+
+    assert messages == []
+
+
 # ── FTS5 inverted-index auto-heal (#1596) ─────────────────────────────
 
 
@@ -2185,13 +2311,25 @@ def _make_fts5_palace(tmp_path, *, corrupt: bool) -> str:
 
 def test_errors_are_isolated_fts5_classification():
     fts = "malformed inverted index for FTS5 table main.embedding_fulltext_search"
+    # SQLite >= ~3.5x (confirmed on 3.53.2 / Python 3.13.7) reports isolated
+    # FTS5 corruption with this wording instead of the older phrasing above.
+    # A regex matching only the old phrasing silently declines to auto-heal
+    # on any machine running a newer SQLite -- caught by this repo's own
+    # test_maybe_autoheal_fts5_index_heals_isolated_corruption failing on
+    # this exact build before _FTS5_MALFORMED_RE was widened to cover both.
+    fts_new = (
+        'fts5: corruption found reading blob 137438953474 from table "embedding_fulltext_search"'
+    )
     page = "Page 4 of B-tree 12345: database disk image is malformed"
     assert repair._errors_are_isolated_fts5([fts])
     assert repair._errors_are_isolated_fts5([fts, fts])
+    assert repair._errors_are_isolated_fts5([fts_new])
+    assert repair._errors_are_isolated_fts5([fts, fts_new])
     assert not repair._errors_are_isolated_fts5([])
     assert not repair._errors_are_isolated_fts5([page])
     # Any non-FTS5 error in the set means the data itself may be damaged.
     assert not repair._errors_are_isolated_fts5([fts, page])
+    assert not repair._errors_are_isolated_fts5([fts_new, page])
 
 
 def test_maybe_autoheal_fts5_index_heals_isolated_corruption(tmp_path):

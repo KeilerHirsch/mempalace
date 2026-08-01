@@ -410,11 +410,109 @@ def _warn_if_legacy_metric(col) -> None:
     )
 
 
+def _hnsw_capacity_diverged(palace_path: str) -> bool:
+    """Return True if HNSW divergence is severe enough to crash ChromaDB.
+
+    Thin, exception-safe wrapper around
+    :func:`mempalace.backends.chroma.hnsw_capacity_status`. Used by the
+    CLI search path to short-circuit to the BM25-only fallback before
+    opening a Chroma client. Client construction and collection identity
+    checks can themselves touch the damaged index, so guarding only
+    ``col.query()`` is too late (#1222 covers the MCP path via the module-level
+    ``_vector_disabled`` flag; this covers the CLI path).
+
+    A probe that raises falls through to ``False`` so the caller proceeds
+    to the normal vector path — the underlying query then either succeeds
+    (probe was a false negative) or raises its own diagnostic error. The
+    probe itself must never be the thing that crashes search.
+    """
+    try:
+        from .backends.chroma import hnsw_capacity_status
+        from .config import get_configured_collection_name
+
+        info = hnsw_capacity_status(palace_path, get_configured_collection_name())
+        return bool(info.get("diverged"))
+    except Exception:
+        logger.debug("HNSW capacity probe raised; proceeding to vector path", exc_info=True)
+        return False
+
+
+def _print_search_results_bm25_only(
+    query: str, palace_path: str, wing: str, room: str, n_results: int
+) -> None:
+    """CLI fallback printer for when HNSW divergence fences off vector search.
+
+    Mirrors the vector-path output shape so users get lexical matches in
+    the format they expect, plus a clear notice pointing at
+    ``mempalace repair``. Replaces the silent SIGBUS users otherwise hit
+    when the CLI called ``col.query()`` against a diverged segment.
+    """
+    result = _bm25_only_via_sqlite(
+        query=query,
+        palace_path=palace_path,
+        wing=wing,
+        room=room,
+        n_results=n_results,
+    )
+    hits = result.get("results", [])
+
+    print(
+        "\n  NOTICE: vector search disabled — HNSW index has diverged from SQLite.\n"
+        "          Showing BM25-only results. Run `mempalace repair` to restore "
+        "vector search.\n"
+    )
+    print(f"{'=' * 60}")
+    print(f'  Results for: "{query}"')
+    if wing:
+        print(f"  Wing: {wing}")
+    if room:
+        print(f"  Room: {room}")
+    print(f"{'=' * 60}\n")
+
+    if not hits:
+        print(f'  No results found for: "{query}"')
+        return
+
+    for i, hit in enumerate(hits, 1):
+        bm25 = hit.get("bm25_score", 0.0)
+        wing_name = hit.get("wing", "?")
+        room_name = hit.get("room", "?")
+        source = Path(hit.get("source_file", "?")).name
+
+        print(f"  [{i}] {wing_name} / {room_name}")
+        print(f"      Source: {source}")
+        print(f"      Match:  bm25={bm25}  (vector disabled)")
+        print()
+        for line in (hit.get("text", "") or "").strip().split("\n"):
+            print(f"      {line}")
+        print()
+        print(f"  {'─' * 56}")
+
+    print()
+
+
 def search(query: str, palace_path: str, wing: str = None, room: str = None, n_results: int = 5):
     """
     Search the palace. Returns verbatim drawer content.
     Optionally filter by wing (project) or room (aspect).
     """
+    # Probe a Chroma palace before get_collection(). Opening the client can
+    # load native index state, and embedder-identity enforcement may call
+    # collection.count(); both happen before the old query-only guard and can
+    # hit the same native crash. Non-Chroma backends never use Chroma's HNSW
+    # files or sqlite-specific fallback and proceed normally.
+    try:
+        backend_name = resolve_backend_name(palace_path)
+    except (BackendMismatchError, KeyError):
+        # Preserve _open_collection_or_explain's state-specific diagnostics
+        # for mixed artifacts and unknown backend selections. This probe is
+        # only an early Chroma safety fence; it must not become a second,
+        # less-helpful backend validation path.
+        backend_name = None
+
+    if backend_name == "chroma" and _hnsw_capacity_diverged(palace_path):
+        return _print_search_results_bm25_only(query, palace_path, wing, room, n_results)
+
     col = _open_collection_or_explain(palace_path, opener=get_collection)
     if col is None:
         if not os.path.isdir(palace_path):

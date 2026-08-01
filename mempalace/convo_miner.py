@@ -65,6 +65,16 @@ CONVO_EXTENSIONS = {
     ".jsonl",
 }
 
+# Directories inside conversation sources that never hold conversations.
+# ``tool-results``: Claude Code pages large tool outputs to
+# ``<session>/tool-results/*.txt`` inside ``~/.claude/projects/<slug>/``.
+# They are raw machine dumps referenced from the transcript JSONL — mining
+# them stores megabytes of command output as "memories" (field measurement:
+# 12.8k drawers from tool-results files on one palace; a single file
+# produced 3.6k). Extends the generic SKIP_DIRS set for the convo scanner
+# only — project mining semantics are unchanged.
+CONVO_SKIP_DIRS = SKIP_DIRS | {"tool-results"}
+
 MIN_CHUNK_SIZE = 30
 CHUNK_SIZE = 800  # chars per drawer — align with miner.py
 _LINE_GROUP_SIZE = 25  # lines per fallback group when no paragraph breaks
@@ -395,7 +405,7 @@ def scan_convos(convo_dir: str) -> list:
     convo_path = Path(convo_dir).expanduser().resolve()
     files = []
     for root, dirs, filenames in os.walk(convo_path):
-        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+        dirs[:] = [d for d in dirs if d not in CONVO_SKIP_DIRS]
         for filename in filenames:
             if filename.endswith(".meta.json"):
                 continue
@@ -695,7 +705,7 @@ def mine_convos(
         )
 
 
-def _compute_hallways_for_wing_safe(wing, collection, drawers_filed):
+def _compute_hallways_for_wing_safe(wing, collection, drawers_filed, config=None):
     """Auto-populate the associative graph from the entities just mined.
 
     Best-effort: hallway computation must never fail an otherwise-good mine, and is
@@ -706,7 +716,7 @@ def _compute_hallways_for_wing_safe(wing, collection, drawers_filed):
     try:
         from .hallways import compute_hallways_for_wing
 
-        compute_hallways_for_wing(wing, col=collection)
+        compute_hallways_for_wing(wing, col=collection, config=config)
     except Exception as exc:  # noqa: BLE001 - best-effort, must never fail an otherwise-good mine
         print(f"  (hallways skipped: {exc})")
 
@@ -722,7 +732,7 @@ def _mine_convos_impl(
 ):
     from .config import MempalaceConfig
 
-    palace_config = MempalaceConfig()
+    palace_config = MempalaceConfig(palace_path=palace_path)
     cfg_chunk_size = palace_config.chunk_size
     # Only override convo_miner's MIN_CHUNK_SIZE when the user has set
     # min_chunk_size explicitly. min_chunk_size_explicit returns the
@@ -879,7 +889,7 @@ def _mine_convos_impl(
         # Compute hallways before the FTS5 validation: the latter opens a direct sqlite
         # connection to the Chroma DB, which can invalidate the live collection handle on
         # some Chroma builds and make the hallway fetch fail.
-        _compute_hallways_for_wing_safe(wing, collection, total_drawers)
+        _compute_hallways_for_wing_safe(wing, collection, total_drawers, config=palace_config)
         _validate_palace_fts5_after_mine(palace_path)
 
     print(f"\n{'=' * 55}")

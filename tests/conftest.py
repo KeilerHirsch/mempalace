@@ -101,10 +101,14 @@ def _reset_mcp_cache():
 
         try:
             # Reset the per-process quarantine gate so tests don't leak
-            # state through ChromaBackend._quarantined_paths.
-            from mempalace.backends.chroma import ChromaBackend
+            # state through ChromaBackend._quarantined_paths, and drop cached
+            # HNSW capacity verdicts (#1471) for the same reason — a test that
+            # reuses a palace path would otherwise inherit the previous test's
+            # verdict.
+            from mempalace.backends.chroma import ChromaBackend, reset_hnsw_capacity_cache
 
             ChromaBackend._quarantined_paths.clear()
+            reset_hnsw_capacity_cache()
         except (ImportError, AttributeError):
             pass
 

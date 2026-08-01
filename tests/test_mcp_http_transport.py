@@ -19,6 +19,9 @@ Design constraints
 
 import http.client
 import json
+import logging
+import socketserver
+import ssl
 import threading
 
 import pytest
@@ -230,6 +233,67 @@ def test_read_only_off_exposes_mutating_tools(http_server):
     status, body = _post(port, "/mcp", {"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
     names = {t["name"] for t in json.loads(body)["result"]["tools"]}
     assert "mempalace_add_drawer" in names
+
+
+@pytest.mark.parametrize(
+    "disconnect_exc",
+    [
+        ConnectionResetError(104, "connection reset by peer"),
+        BrokenPipeError(32, "broken pipe"),
+        ssl.SSLEOFError("unexpected eof while reading"),
+    ],
+    ids=["connreset", "brokenpipe", "ssleof"],
+)
+def test_handle_error_quiets_client_disconnect(caplog, monkeypatch, disconnect_exc):
+    """Regression for #2003: a client that hangs up mid-response makes the send
+    path raise ConnectionError (BrokenPipeError / ConnectionResetError), or
+    ssl.SSLEOFError on the TLS transport. The server must log that quietly at
+    DEBUG instead of routing it to the default handler's per-request traceback.
+    """
+    httpd = mcp._build_http_server("127.0.0.1", 0)
+    try:
+        delegated = []
+        monkeypatch.setattr(
+            socketserver.BaseServer,
+            "handle_error",
+            lambda self, request, addr: delegated.append(addr),
+        )
+        addr = ("127.0.0.1", 51234)
+
+        with caplog.at_level(logging.DEBUG, logger="mempalace_mcp"):
+            try:
+                raise disconnect_exc
+            except type(disconnect_exc):
+                httpd.handle_error(None, addr)
+
+        assert delegated == []  # noisy default handler NOT invoked
+        rec = next(r for r in caplog.records if "disconnect" in r.getMessage().lower())
+        assert rec.levelno == logging.DEBUG
+        assert rec.name == "mempalace_mcp"
+    finally:
+        httpd.server_close()
+
+
+def test_handle_error_delegates_real_errors(monkeypatch):
+    """A genuine error is NOT misclassified as a disconnect: it reaches the
+    default handler, so its traceback is still surfaced.
+    """
+    httpd = mcp._build_http_server("127.0.0.1", 0)
+    try:
+        delegated = []
+        monkeypatch.setattr(
+            socketserver.BaseServer,
+            "handle_error",
+            lambda self, request, addr: delegated.append(addr),
+        )
+        addr = ("127.0.0.1", 51234)
+        try:
+            raise ValueError("boom")
+        except ValueError:
+            httpd.handle_error(None, addr)
+        assert delegated == [addr]
+    finally:
+        httpd.server_close()
 
 
 def _make_self_signed_cert(tmp_path):

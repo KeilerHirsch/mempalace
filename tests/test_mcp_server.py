@@ -1983,6 +1983,201 @@ class TestWriteTools:
         assert "mempalace_checkpoint" in mcp_server.TOOLS
         assert mcp_server.TOOLS["mempalace_checkpoint"]["handler"] is mcp_server.tool_checkpoint
 
+    def test_checkpoint_added_by_defaults_to_diary_agent(
+        self, monkeypatch, config, palace_path, kg
+    ):
+        """#2023: with no explicit ``added_by``, each filed drawer is attributed
+        to the diary ``agent_name`` (verbatim case) rather than the generic
+        ``checkpoint`` label, so the filing agent survives in provenance."""
+        _patch_mcp_server(monkeypatch, config, kg)
+        _client, _col = _get_collection(palace_path, create=True)
+        _client.close()  # release file handles; a bare del leaks them on Windows (#1128)
+        from mempalace.mcp_server import tool_checkpoint
+
+        result = tool_checkpoint(
+            items=[{"wing": "w", "room": "decisions", "content": "Use PostgreSQL for storage."}],
+            diary={"agent_name": "DeepSeek", "wing": "w", "entry": "SESSION|did.stuff|star"},
+        )
+        assert len(result["added"]) == 1
+
+        client, col = _get_collection(palace_path)
+        try:
+            metas = col.get(include=["metadatas"])["metadatas"]
+        finally:
+            client.close()
+        drawers = [m for m in metas if m.get("room") == "decisions"]
+        assert len(drawers) == 1
+        # Verbatim case, not the lowercased diary-index form of agent_name.
+        assert drawers[0]["added_by"] == "DeepSeek"
+
+    def test_checkpoint_explicit_added_by_overrides_diary(self, monkeypatch):
+        """An explicit ``added_by`` wins over the diary ``agent_name`` fallback."""
+        from mempalace import mcp_server
+
+        monkeypatch.setattr(
+            mcp_server, "tool_check_duplicate", lambda *a, **k: {"is_duplicate": False}
+        )
+        monkeypatch.setattr(mcp_server, "tool_diary_write", lambda **k: {"success": True})
+        filed = {}
+
+        def _add(**kwargs):
+            filed.update(kwargs)
+            return {"success": True, "drawer_id": "d1"}
+
+        monkeypatch.setattr(mcp_server, "tool_add_drawer", _add)
+
+        mcp_server.tool_checkpoint(
+            items=[{"wing": "w", "room": "r", "content": "keep me"}],
+            diary={"agent_name": "deepseek", "entry": "SESSION|x|star"},
+            added_by="alice",
+        )
+        assert filed["added_by"] == "alice"
+
+    def test_checkpoint_added_by_falls_back_to_checkpoint_label(self, monkeypatch):
+        """Neither an explicit ``added_by`` nor a diary ``agent_name`` -> the
+        drawer keeps the legacy ``checkpoint`` attribution (backward compatible)."""
+        from mempalace import mcp_server
+
+        monkeypatch.setattr(
+            mcp_server, "tool_check_duplicate", lambda *a, **k: {"is_duplicate": False}
+        )
+        monkeypatch.setattr(mcp_server, "tool_diary_write", lambda **k: {"success": True})
+        seen = []
+
+        def _add(**kwargs):
+            seen.append(kwargs["added_by"])
+            return {"success": True, "drawer_id": "d1"}
+
+        monkeypatch.setattr(mcp_server, "tool_add_drawer", _add)
+
+        # No diary block at all.
+        mcp_server.tool_checkpoint(items=[{"wing": "w", "room": "r", "content": "a"}])
+        # Diary present but without an ``agent_name``.
+        mcp_server.tool_checkpoint(
+            items=[{"wing": "w", "room": "r", "content": "b"}],
+            diary={"entry": "SESSION|y|star"},
+        )
+        assert seen == ["checkpoint", "checkpoint"]
+
+    def test_checkpoint_added_by_accepted_via_dispatch(self, monkeypatch):
+        """#2023: ``added_by`` passes the tools/call schema whitelist (the
+        reporter's HTTP MCP transport reuses this dispatcher) and the real
+        handler forwards it, for both the explicit value and the diary fallback."""
+        from mempalace import mcp_server
+
+        monkeypatch.setattr(
+            mcp_server, "tool_check_duplicate", lambda *a, **k: {"is_duplicate": False}
+        )
+        monkeypatch.setattr(mcp_server, "tool_diary_write", lambda **k: {"success": True})
+        filed = {}
+
+        def _add(**kwargs):
+            filed.update(kwargs)
+            return {"success": True, "drawer_id": "d1"}
+
+        monkeypatch.setattr(mcp_server, "tool_add_drawer", _add)
+
+        resp = mcp_server.handle_request({
+            "method": "tools/call",
+            "id": 1,
+            "params": {
+                "name": "mempalace_checkpoint",
+                "arguments": {
+                    "items": [{"wing": "w", "room": "r", "content": "hi"}],
+                    "added_by": "alice",
+                },
+            },
+        })
+        assert "error" not in resp
+        assert filed["added_by"] == "alice"
+
+        filed.clear()
+        resp2 = mcp_server.handle_request({
+            "method": "tools/call",
+            "id": 2,
+            "params": {
+                "name": "mempalace_checkpoint",
+                "arguments": {
+                    "items": [{"wing": "w", "room": "r", "content": "yo"}],
+                    "diary": {"agent_name": "DeepSeek", "entry": "SESSION|z|star"},
+                },
+            },
+        })
+        assert "error" not in resp2
+        assert filed["added_by"] == "DeepSeek"
+
+    def test_checkpoint_schema_exposes_added_by(self):
+        """``added_by`` is declared in the checkpoint tool schema so the
+        dispatch whitelist admits it instead of rejecting it as unknown."""
+        from mempalace import mcp_server
+
+        props = mcp_server.TOOLS["mempalace_checkpoint"]["input_schema"]["properties"]
+        assert "added_by" in props
+        assert props["added_by"]["type"] == "string"
+
+    def test_checkpoint_blank_or_invalid_added_by_defers_to_diary(self, monkeypatch):
+        """A blank, whitespace-only, non-string, or None explicit ``added_by``
+        counts as unspecified, so it defers to the diary ``agent_name`` rather
+        than masking it; with no usable diary name it falls to ``checkpoint``."""
+        from mempalace import mcp_server
+
+        monkeypatch.setattr(
+            mcp_server, "tool_check_duplicate", lambda *a, **k: {"is_duplicate": False}
+        )
+        monkeypatch.setattr(mcp_server, "tool_diary_write", lambda **k: {"success": True})
+        seen = []
+
+        def _add(**kwargs):
+            seen.append(kwargs["added_by"])
+            return {"success": True, "drawer_id": "d1"}
+
+        monkeypatch.setattr(mcp_server, "tool_add_drawer", _add)
+
+        diary = {"agent_name": "deepseek", "entry": "SESSION|x|star"}
+        for bad in ("", "   ", 123, None):
+            mcp_server.tool_checkpoint(
+                items=[{"wing": "w", "room": "r", "content": f"c{bad!r}"}],
+                diary=diary,
+                added_by=bad,
+            )
+        # Every unusable explicit value defers to the diary agent.
+        assert seen == ["deepseek", "deepseek", "deepseek", "deepseek"]
+
+        # Blank explicit AND a blank diary name -> the legacy label.
+        seen.clear()
+        mcp_server.tool_checkpoint(
+            items=[{"wing": "w", "room": "r", "content": "z"}],
+            diary={"agent_name": "   ", "entry": "SESSION|y|star"},
+            added_by="",
+        )
+        assert seen == ["checkpoint"]
+
+    def test_checkpoint_added_by_uniform_across_items(self, monkeypatch):
+        """All items in one checkpoint share a single resolved author (a
+        checkpoint is one agent's session save; attribution is resolved once)."""
+        from mempalace import mcp_server
+
+        monkeypatch.setattr(
+            mcp_server, "tool_check_duplicate", lambda *a, **k: {"is_duplicate": False}
+        )
+        monkeypatch.setattr(mcp_server, "tool_diary_write", lambda **k: {"success": True})
+        seen = []
+
+        def _add(**kwargs):
+            seen.append(kwargs["added_by"])
+            return {"success": True, "drawer_id": kwargs["content"]}
+
+        monkeypatch.setattr(mcp_server, "tool_add_drawer", _add)
+
+        mcp_server.tool_checkpoint(
+            items=[
+                {"wing": "w", "room": "r", "content": "one"},
+                {"wing": "w", "room": "r", "content": "two"},
+            ],
+            diary={"agent_name": "DeepSeek", "entry": "SESSION|q|star"},
+        )
+        assert seen == ["DeepSeek", "DeepSeek"]
+
     def test_get_drawer(self, monkeypatch, config, palace_path, seeded_collection, kg):
         _patch_mcp_server(monkeypatch, config, kg)
         from mempalace.mcp_server import tool_get_drawer
