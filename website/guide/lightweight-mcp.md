@@ -1,6 +1,6 @@
 # Lightweight MCP Integration & Palace Query Language (PQL)
 
-The **MemPalace Lightweight MCP Server** reduces the MCP tool surface from **45 separate tools down to 3 high-density tools** (`palace_query`, `palace_exec`, `palace_coordinate`). This saves **>80–90% of schema context tokens** on every AI interaction while retaining 100% of underlying features, guarantees, and security checks.
+The **MemPalace Lightweight MCP Server** reduces the MCP tool surface from **47 separate tools down to 3 high-density tools** (`palace_query`, `palace_exec`, `palace_coordinate`). This saves **>80–90% of schema context tokens** on every AI interaction while retaining 100% of underlying features, guarantees, and security checks.
 
 ---
 
@@ -12,7 +12,7 @@ claude mcp add mempalace-light -- mempalace-light-mcp
 codex mcp add mempalace-light -- mempalace-light-mcp
 ```
 
-Side-by-side with the existing 45-tool server: keep `mempalace` pointing at `mempalace-mcp`, and register the 3-tool server as `mempalace-light`.
+Side-by-side with the existing 47-tool server: keep `mempalace` pointing at `mempalace-mcp`, and register the 3-tool server as `mempalace-light`.
 
 ### With Custom Palace Path
 ```bash
@@ -40,6 +40,8 @@ Both string DSL format (for fast natural-language generation) and structured JSO
 #### Search & Recall
 - `FIND <query> [IN <wing>[/<room>]] [LIMIT <n>] [SINCE <date>] [BEFORE <date>] [MAX_DIST <f>] [STRATEGY <vector|union>] [SOURCE <path>]`
 - `SEARCH <query> ...`
+- Clause keywords are the upper-case tokens themselves: a lower-case word such as
+  `in`, `limit`, `source` or `strategy` inside `<query>` stays search text.
 - Example: `FIND "jwt auth tokens" IN backend/auth LIMIT 5 SINCE 2026-01-01`
 - Example: `FIND "database migrations" IN wing_core`
 
@@ -108,7 +110,8 @@ Both string DSL format (for fast natural-language generation) and structured JSO
 #### Tasks & Events
 - `TASK CREATE project:<proj> from:<agent> to:<agent> goal:<text> branch:<br> base:<sha> done:<text>`
 - `EVENT APPEND type:<type> stream:<stream> room:<room> from:<agent> [to:<agent>] [topic:<topic>] [correlation:<id>] [status:<status>] [body:<text>]`
-- `EVENT LIST [stream:<stream>] [room:<room>] [topic:<topic>] [to:<agent>] [from:<agent>] [correlation:<id>] [since_id:<id>] [limit:<n>] [order:asc|desc]`
+- `EVENT INBOX [to:<agent>] [since_id:<id>] [LIMIT n] [DESC|ASC] [PREVIEW]` — newest-first without a cursor; `preview` defaults on
+- `EVENT LIST [stream:<stream>] [room:<room>] [topic:<topic>] [to:<agent>] [from:<agent>] [correlation:<id>] [since_id:<id>] [LIMIT n] [DESC|ASC] [PREVIEW]` — newest-first when `since_id` is omitted; chronological when resuming
 - `EVENT WAIT [stream:<stream>] [correlation:<id>] [since_id:<id>] [timeout_ms:<ms>]`
 - `EVENT ACK event_id:<id> from:<agent> [status:<status>] [body:<text>]`
 

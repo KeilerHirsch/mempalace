@@ -204,9 +204,11 @@ def _logstream_watch(ls, args, as_json):
         WATCH_STATE_ABSENT,
         WATCH_STATE_CORRUPT,
         read_watch_state,
+        resolve_watch_state_file,
         write_watch_cursor,
     )
 
+    args.state_file = resolve_watch_state_file(args.state_file, args.agent)
     spec = _watch_spec(args, as_json)
 
     stored_cursor, state_condition = read_watch_state(args.state_file)
@@ -299,12 +301,13 @@ def _logstream_watch(ls, args, as_json):
         return min(args.poll_timeout_ms, remaining_ms)
 
     try:
-        for matched, cursor in ls.watch_events(
+        for matched, latest in ls.watch_events(
             cursor=cursor,
             poll_timeout_ms=_poll_timeout_ms,
             limit=args.limit,
             **spec,
         ):
+            cursor = latest
             if matched:
                 matched_any = True
                 if idle_s:
